@@ -1,0 +1,34 @@
+{
+  "name": "disclaude",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Disclaude - Discord bot for managing Claude Code sessions",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/disclaude/app.git"
+  },
+  "dependencies": {
+    "discord.js": "^14.25.1",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@vitest/coverage-v8": "^4.0.14",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14"
+  }
+}
