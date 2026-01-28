@@ -289,6 +289,7 @@ const TOOL_EMOJI: Record<string, string> = {
   'WebFetch': '🌐',
   'WebSearch': '🔎',
   'AskUserQuestion': '❓',
+  'MCP': '📔',
 };
 
 /**
@@ -352,8 +353,53 @@ export function parseClaudeOutput(raw: string): OutputSegment[] {
       continue;
     }
 
-    // Tool output lines (│ prefix) - skip these
-    if (clean.startsWith('│') || clean.startsWith('|')) {
+    // Tool output lines (│ or ⎿ prefix) - skip these
+    if (clean.startsWith('│') || clean.startsWith('|') || clean.startsWith('⎿')) {
+      inToolOutput = true;
+      continue;
+    }
+
+    // Skip raw JSON lines (from MCP responses)
+    if (/^[\[{"]/.test(clean) || /^"[\w]+":/.test(clean) || clean === '}' || clean === ']' || clean.startsWith('…')) {
+      continue;
+    }
+
+    // Web Search: "● Web Search("query")"
+    const webSearchMatch = clean.match(/^●?\s*Web Search\s*\(["']?(.+?)["']?\)/i);
+    if (webSearchMatch) {
+      // Save previous segment
+      if (currentSegment) {
+        segments.push(currentSegment);
+      }
+      let query = webSearchMatch[1].replace(/\)$/, '').replace(/["']/g, '').trim();
+      if (query.length > 50) {
+        query = query.slice(0, 47) + '...';
+      }
+      currentSegment = {
+        type: 'tool_call',
+        content: clean,
+        toolName: 'WebSearch',
+        toolTarget: query,
+      };
+      inToolOutput = true;
+      continue;
+    }
+
+    // MCP tools: "● provider - method (MCP)(params)" or "● provider - method (MCP)"
+    const mcpMatch = clean.match(/^●?\s*(\w+)\s*-\s*([\w_]+)\s*\(MCP\)/i);
+    if (mcpMatch) {
+      // Save previous segment
+      if (currentSegment) {
+        segments.push(currentSegment);
+      }
+      const provider = mcpMatch[1];  // e.g., "obsidian"
+      const method = mcpMatch[2];    // e.g., "search_notes"
+      currentSegment = {
+        type: 'tool_call',
+        content: clean,
+        toolName: 'MCP',
+        toolTarget: `${provider}: ${method.replace(/_/g, ' ')}`,  // "obsidian: search notes"
+      };
       inToolOutput = true;
       continue;
     }
@@ -510,6 +556,9 @@ function formatToolCallSummary(calls: OutputSegment[]): string {
       'Glob': 'Searched',
       'Grep': 'Searched',
       'Task': 'Spawned agent',
+      'WebSearch': 'Searched',
+      'WebFetch': 'Fetched',
+      'MCP': 'MCP',
     };
     const friendly = displayName[toolName] || toolName;
 

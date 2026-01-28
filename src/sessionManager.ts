@@ -96,8 +96,10 @@ class SessionManager {
     try {
       // Create a new tmux session running claude
       // Using spawnSync with args array to prevent command injection
+      // Set wide terminal (200 cols) to prevent URL wrapping in output
       const result = spawnSync('tmux', [
         'new-session', '-d',
+        '-x', '200', '-y', '50',
         '-s', tmuxName,
         '-c', resolvedDir,
         'claude', '--dangerously-skip-permissions'
