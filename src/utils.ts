@@ -353,9 +353,15 @@ export function parseClaudeOutput(raw: string): OutputSegment[] {
       continue;
     }
 
-    // Tool output lines (│ or ⎿ prefix) - skip these
-    if (clean.startsWith('│') || clean.startsWith('|') || clean.startsWith('⎿')) {
+    // Tool output lines (⎿ prefix) - always skip these
+    if (clean.startsWith('⎿')) {
       inToolOutput = true;
+      continue;
+    }
+
+    // │ can be tool output OR ASCII table borders in text
+    // Only skip if we're already in tool output mode, otherwise keep for tables
+    if ((clean.startsWith('│') || clean.startsWith('|')) && inToolOutput) {
       continue;
     }
 

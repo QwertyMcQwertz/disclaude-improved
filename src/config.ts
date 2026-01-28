@@ -1,4 +1,9 @@
 import 'dotenv/config';
+import { homedir } from 'os';
+import { join } from 'path';
+
+// Default session directory - used when DEFAULT_DIRECTORY env var is not set
+const DEFAULT_SESSION_DIR = join(homedir(), '.disclaude', 'sessions');
 
 export interface Config {
   token: string;
@@ -37,7 +42,7 @@ export const config: Config = {
   categoryName: process.env.CATEGORY_NAME || 'Claude Sessions',
 
   // Default working directory for new sessions
-  defaultDirectory: process.env.DEFAULT_DIRECTORY || process.cwd(),
+  defaultDirectory: process.env.DEFAULT_DIRECTORY || DEFAULT_SESSION_DIR,
 
   // Allowed Discord user IDs (comma-separated in .env)
   allowedUsers: process.env.ALLOWED_USERS?.split(',').map(id => id.trim()).filter(Boolean) || [],

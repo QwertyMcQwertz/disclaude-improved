@@ -1,7 +1,75 @@
 import { execSync, spawnSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
-import { resolve } from 'path';
+import { resolve, join } from 'path';
+
+/**
+ * Default CLAUDE.md content for Discord-friendly formatting
+ */
+const CLAUDE_MD_CONTENT = `# Discord Bot Session
+
+Your output is being relayed to Discord. Markdown rendering is limited.
+
+## What Works
+- Bullet points with \`-\`
+- Numbered lists
+- Inline \`code\`
+- Unicode formatting for emphasis:
+  - 𝗯𝗼𝗹𝗱 (Mathematical Sans-Serif Bold)
+  - 𝘪𝘵𝘢𝘭𝘪𝘤 (Mathematical Sans-Serif Italic)
+  - 𝙗𝙤𝙡𝙙 𝙞𝙩𝙖𝙡𝙞𝙘 (Mathematical Sans-Serif Bold Italic)
+  - u̲n̲d̲e̲r̲l̲i̲n̲e̲ (combining underline characters)
+
+## What Does NOT Work
+- **Tables** - pipe tables break completely, avoid them
+- Standard markdown bold (\`**text**\`)
+- Standard markdown italic (\`*text*\`)
+- Code blocks with triple backticks
+
+## Instead of Tables
+Use bullet lists:
+- Server: laptop | IP: 100.91.125.103 | Role: App server
+- Server: sv1 | IP: 100.84.12.60 | Role: DNS
+
+Or structured lists:
+- 𝗹𝗮𝗽𝘁𝗼𝗽
+  - IP: 100.91.125.103
+  - Role: App server
+
+## Keep It Concise
+- Discord has a 2000 character limit per message
+- Prefer bullet points over paragraphs
+- Keep output under ~80 chars wide when possible
+`;
+
+/**
+ * Ensure the session workspace directory exists with a CLAUDE.md file
+ * Only creates files if they don't exist (preserves user customizations)
+ */
+export function ensureSessionWorkspace(dir: string): void {
+  // Expand ~ to home directory
+  const expandedDir = dir.startsWith('~') ? dir.replace('~', homedir()) : dir;
+  const resolvedDir = resolve(expandedDir);
+
+  // Create directory if needed
+  if (!existsSync(resolvedDir)) {
+    mkdirSync(resolvedDir, { recursive: true });
+    console.log(`Created session directory: ${resolvedDir}`);
+  }
+
+  // Create .claude directory
+  const claudeDir = join(resolvedDir, '.claude');
+  if (!existsSync(claudeDir)) {
+    mkdirSync(claudeDir, { recursive: true });
+  }
+
+  // Create CLAUDE.md only if it doesn't exist (preserve user edits)
+  const claudeMdPath = join(claudeDir, 'CLAUDE.md');
+  if (!existsSync(claudeMdPath)) {
+    writeFileSync(claudeMdPath, CLAUDE_MD_CONTENT, 'utf-8');
+    console.log(`Created Discord formatting guide: ${claudeMdPath}`);
+  }
+}
 
 // Allowed base paths for sessions (set via config)
 let allowedPaths: string[] = [];

@@ -16,12 +16,15 @@ import {
   ActivityType,
   MessageFlags,
 } from 'discord.js';
-import sessionManager, { setAllowedPaths } from './sessionManager.js';
+import sessionManager, { setAllowedPaths, ensureSessionWorkspace } from './sessionManager.js';
 import config from './config.js';
 import { parseClaudeOutput, formatForDiscord } from './utils.js';
 
 // Initialize allowed paths from config
 setAllowedPaths(config.allowedPaths);
+
+// Ensure default session directory exists with CLAUDE.md
+ensureSessionWorkspace(config.defaultDirectory);
 
 const client = new Client({
   intents: [
