@@ -1,8 +1,8 @@
-# Disclaude
+# Disclaude (Improved)
 
 A Discord bot for managing persistent Claude Code sessions. Each session gets its own channel - just type to talk to Claude.
 
-> **Note:** This is a fork of [disclaude/app](https://github.com/disclaude/app) with compatibility fixes and improvements. See [Changes from Upstream](#changes-from-upstream) for details.
+> **Fork Notice:** This is an improved fork of [disclaude/app](https://github.com/disclaude/app) by Mike Burgh. See [Changes from Upstream](#changes-from-upstream) and [Credits](#credits).
 
 ## How It Works
 
@@ -49,32 +49,20 @@ A Discord bot for managing persistent Claude Code sessions. Each session gets it
 
 Create a `.env` file:
 ```bash
-# Discord Bot Token
-# Get from: https://discord.com/developers/applications -> Your App -> Bot -> Reset Token
+# Required
 DISCORD_TOKEN=your_bot_token_here
-
-# Discord Application Client ID
-# Get from: https://discord.com/developers/applications -> Your App -> OAuth2 -> Client ID
 DISCORD_CLIENT_ID=your_client_id_here
-
-# Guild/Server ID
-# Enable Developer Mode: Discord Settings -> Advanced -> Developer Mode
-# Then right-click your server -> Copy Server ID
 DISCORD_GUILD_ID=your_guild_id_here
 
-# Default working directory for new sessions (optional)
-DEFAULT_DIRECTORY=/path/to/your/projects
-
-# Category name for session channels (optional, default: "Claude Sessions")
-CATEGORY_NAME=Claude Sessions
-
-# Allowed Discord user IDs - HIGHLY RECOMMENDED
-# Right-click your username -> Copy User ID (enable Developer Mode)
-# Comma-separated for multiple users
+# Security (highly recommended)
 ALLOWED_USERS=123456789012345678
+ALLOWED_PATHS=~/projects,~/work
 
-# Auto-delete messages older than N days (optional, default: never)
+# Optional
+DEFAULT_DIRECTORY=~/projects
+CATEGORY_NAME=Claude Sessions
 MESSAGE_RETENTION_DAYS=7
+RATE_LIMIT_MS=1000
 ```
 
 ### 3. Run
@@ -89,7 +77,7 @@ For development (with hot reload):
 npm run dev
 ```
 
-### Running as a systemd service
+### Running as a systemd Service
 
 If you run disclaude as a systemd user service, you **must** set `KillMode=process` so tmux sessions survive restarts:
 
@@ -167,10 +155,92 @@ Discord Channel                tmux Session
 ```
 
 Sessions are standard tmux sessions prefixed with `claude-`. The bot:
-1. Creates tmux sessions running the `claude` CLI with `--dangerously-skip-permissions`
+1. Creates tmux sessions running `claude --dangerously-skip-permissions`
 2. Sends your Discord messages to the session via `tmux send-keys`
 3. Polls for new output, parses it, and streams formatted responses to Discord
 4. Persists session mappings to `~/.disclaude/sessions.json` for restart recovery
+
+## Security
+
+> **⚠️ Warning:** This bot can execute arbitrary code on your machine. Anyone who can send messages to a session channel can instruct Claude to run commands, edit files, etc.
+
+### User Whitelist
+
+**Always** set `ALLOWED_USERS` in your `.env`:
+
+```bash
+# Single user
+ALLOWED_USERS=123456789012345678
+
+# Multiple users
+ALLOWED_USERS=123456789012345678,987654321098765432
+```
+
+To get your Discord user ID: Discord Settings → Advanced → Enable Developer Mode, then right-click your username → Copy User ID.
+
+### Path Restrictions
+
+Restrict which directories sessions can be created in:
+
+```bash
+ALLOWED_PATHS=~/projects,~/work,/opt/apps
+```
+
+Without this, sessions can be created in any directory the bot has access to.
+
+### Additional Recommendations
+
+- **Enable 2FA** on your Discord account
+- **Never commit `.env`** - it's in `.gitignore` by default
+- **Regenerate your bot token** immediately if exposed
+- **Run in a VM/container** for additional isolation
+- **Keep the guild private** - don't invite untrusted users
+
+### Bot Logs
+
+The bot creates a `#bot-logs` channel in the Claude Sessions category that logs:
+- Session creation/deletion
+- File edits detected
+- Errors and warnings
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DISCORD_TOKEN` | Yes | Bot token from Discord Developer Portal |
+| `DISCORD_CLIENT_ID` | Yes | Application ID from Discord Developer Portal |
+| `DISCORD_GUILD_ID` | Yes | Server ID (right-click server → Copy ID) |
+| `ALLOWED_USERS` | No* | Comma-separated Discord user IDs (* highly recommended) |
+| `ALLOWED_PATHS` | No* | Comma-separated directories for sessions (* recommended) |
+| `DEFAULT_DIRECTORY` | No | Default working directory for new sessions |
+| `CATEGORY_NAME` | No | Category name for session channels (default: "Claude Sessions") |
+| `MESSAGE_RETENTION_DAYS` | No | Auto-delete messages older than N days |
+| `RATE_LIMIT_MS` | No | Minimum ms between messages per user (default: 1000) |
+
+## Data Storage
+
+- `~/.disclaude/sessions.json` - Persisted session-to-channel mappings
+- `<session-dir>/.claude/CLAUDE.md` - Discord formatting guide for each session
+
+## Troubleshooting
+
+### "tmux: command not found"
+Install tmux: `sudo dnf install tmux` (Fedora) or `brew install tmux` (macOS)
+
+### Sessions lost after bot restart
+Add `KillMode=process` to your systemd service file. See [Running as a systemd Service](#running-as-a-systemd-service).
+
+### Bot not responding to messages
+1. Check that the user is in `ALLOWED_USERS`
+2. Verify the channel is linked to a session (`/claude list`)
+3. Check `#bot-logs` for errors
+4. Verify the tmux session exists: `tmux list-sessions`
+
+### "Directory not in allowed paths" error
+Add the directory to `ALLOWED_PATHS` in your `.env` file.
+
+### Claude not responding in tmux
+Attach to the session (`tmux attach -t claude-<name>`) and check for errors. The Claude CLI may need re-authentication.
 
 ## Changes from Upstream
 
@@ -200,56 +270,8 @@ This fork includes the following improvements over [disclaude/app](https://githu
 ### Deployment
 - **systemd compatibility** - Documents `KillMode=process` requirement for service files
 
-## Security
+## Credits
 
-**This bot can execute arbitrary code on your machine.** Anyone who can send messages to a session channel can instruct Claude to run commands, edit files, etc.
+This project is based on [disclaude](https://github.com/disclaude/app) by **Mike Burgh**.
 
-### User Whitelist (Required)
-
-Always set `ALLOWED_USERS` in your `.env`:
-
-```bash
-# Single user
-ALLOWED_USERS=123456789012345678
-
-# Multiple users
-ALLOWED_USERS=123456789012345678,987654321098765432
-```
-
-**To get your Discord user ID:**
-1. Discord Settings → Advanced → Enable Developer Mode
-2. Right-click your username → Copy User ID
-
-Without `ALLOWED_USERS`, the bot warns at startup and allows anyone in the guild to use it.
-
-### Additional Recommendations
-
-- **Enable 2FA** on your Discord account
-- **Never commit `.env`** - it's in `.gitignore` by default
-- **Regenerate your bot token** immediately if exposed (Discord Developer Portal → Bot → Reset Token)
-- **Run in a VM/container** for additional isolation
-- **Keep the guild private** - don't invite untrusted users
-
-### Bot Logs
-
-The bot creates a `#bot-logs` channel in the Claude Sessions category that logs:
-- Session creation/deletion
-- File edits detected
-- Errors and warnings
-
-## Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DISCORD_TOKEN` | Yes | Bot token from Discord Developer Portal |
-| `DISCORD_CLIENT_ID` | Yes | Application ID from Discord Developer Portal |
-| `DISCORD_GUILD_ID` | Yes | Server ID (right-click server → Copy ID) |
-| `DEFAULT_DIRECTORY` | No | Default working directory for new sessions |
-| `CATEGORY_NAME` | No | Category name for session channels (default: "Claude Sessions") |
-| `ALLOWED_USERS` | No* | Comma-separated Discord user IDs (* highly recommended) |
-| `MESSAGE_RETENTION_DAYS` | No | Auto-delete messages older than N days |
-
-## Data Storage
-
-- `~/.disclaude/sessions.json` - Persisted session-to-channel mappings
-- `<session-dir>/.claude/CLAUDE.md` - Discord formatting guide for each session
+See [NOTICE.md](NOTICE.md) for full attribution.

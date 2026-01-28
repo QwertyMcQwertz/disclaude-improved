@@ -13,12 +13,12 @@
     "test:coverage": "vitest run --coverage"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "Disclaude - Discord bot for managing Claude Code sessions",
+  "author": "Mike Burgh (https://github.com/disclaude)",
+  "license": "UNLICENSED",
+  "description": "Discord bot for managing persistent Claude Code sessions",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/disclaude/app.git"
+    "url": "git+https://github.com/QwertyMcQwertz/disclaude-improved.git"
   },
   "dependencies": {
     "discord.js": "^14.25.1",
