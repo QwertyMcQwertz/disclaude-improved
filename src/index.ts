@@ -18,6 +18,7 @@ import {
 } from 'discord.js';
 import sessionManager, { setAllowedPaths } from './sessionManager.js';
 import config from './config.js';
+import { parseClaudeOutput, formatForDiscord } from './utils.js';
 
 // Initialize allowed paths from config
 setAllowedPaths(config.allowedPaths);
@@ -628,80 +629,15 @@ function startOutputPoller(sessionId: string, channel: TextChannel): void {
       // Skip further processing if nothing changed
       if (!contentChanged) return;
 
-      // Find content after the user's message
-      // Claude Code echoes input as "> message"
-      let currentContent = '';
+      // Parse the output into structured segments and format for Discord
+      const segments = parseClaudeOutput(outputForCompare);
+      const formattedContent = formatForDiscord(segments);
 
-      if (state.lastUserMessage) {
-        // Use the clean (no ANSI) version for finding the marker
-        const lines = outputForCompare.split('\n');
-        const displayLines = outputForDisplay.split('\n');
+      // If no meaningful content, don't show anything yet
+      if (!formattedContent || formattedContent.length < 3) return;
 
-        // Find the LAST occurrence of the user's prompt (in case of history)
-        let markerLineIdx = -1;
-        const isSlashCommand = state.lastUserMessage.startsWith('/');
-
-        for (let i = lines.length - 1; i >= 0; i--) {
-          const line = lines[i].trim();
-
-          // Regular messages: look for "❯ message" or "> message"
-          if ((line.startsWith('❯') || line.startsWith('>')) && line.includes(state.lastUserMessage.slice(0, 30))) {
-            markerLineIdx = i;
-            break;
-          }
-
-          // Slash commands: look for "/command is running" or the command echoed
-          if (isSlashCommand) {
-            const cmdName = state.lastUserMessage.split(' ')[0]; // e.g., "/triage"
-            if (line.includes(cmdName) && (line.includes('running') || line.startsWith('>'))) {
-              markerLineIdx = i;
-              break;
-            }
-          }
-        }
-
-        // Fallback: if we can't find the marker but see Claude's response indicator, show from there
-        if (markerLineIdx < 0) {
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (line.includes('⏺') || line.includes('●') || line.startsWith('│') || line.includes('Read(') || line.includes('Edit(') || line.includes('Bash(')) {
-              markerLineIdx = Math.max(0, i - 1); // Start one line before
-              break;
-            }
-          }
-        }
-
-        if (markerLineIdx >= 0) {
-          // Skip past all prompt lines (user input may wrap across multiple lines)
-          // Look for Claude's response start indicator (⏺) or first non-empty content line
-          let responseStartIdx = markerLineIdx + 1;
-          for (let i = markerLineIdx + 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            // Claude's response typically starts with ⏺ or ● or after blank lines
-            if (line.includes('⏺') || line.includes('●') || line.startsWith('│') || line.startsWith('⎯')) {
-              responseStartIdx = i;
-              break;
-            }
-            // Skip empty lines and lines that look like wrapped prompt text
-            // (prompt text doesn't start with special chars)
-            if (line && !line.match(/^[a-z0-9"'`\[\(]/i)) {
-              responseStartIdx = i;
-              break;
-            }
-          }
-          currentContent = displayLines.slice(responseStartIdx).join('\n').trim();
-        }
-      }
-
-      // Strip the prompt footer (input box, etc.)
-      currentContent = stripPromptFooter(currentContent);
-
-      // If we couldn't find the marker or content is trivial, don't show anything yet
-      if (!currentContent || currentContent.length < 3) return;
-
-      // Update accumulated response - use the full current content
-      // This ensures we always show the complete response, not just new parts
-      state.accumulatedResponse = currentContent;
+      // Update accumulated response
+      state.accumulatedResponse = formattedContent;
 
       // Detect file edits and track them
       const editedFiles = detectFileEdits(outputForCompare);
@@ -717,28 +653,25 @@ function startOutputPoller(sessionId: string, channel: TextChannel): void {
         }
       }
 
-      // Convert ANSI codes for Discord compatibility
-      const fullDisplayContent = convertAnsiForDiscord(state.accumulatedResponse);
+      // Use the formatted content directly (plain text for Discord)
+      const fullDisplayContent = state.accumulatedResponse;
 
       // Check for prompts in current output (use version without ANSI)
       const promptOptions = detectPrompt(outputForCompare);
 
-      // Discord message limit is 2000 chars. Code block wrapper adds ~12 chars.
-      // We need to be conservative because ANSI codes add lots of hidden chars.
-      const maxMessageLength = 1900;
+      // Discord message limit is 2000 chars
+      const maxMessageLength = 1950;
 
       // Get just the content for this message (from currentMessageStart onwards)
       let displayContent = fullDisplayContent.slice(state.currentMessageStart);
 
-      // Check actual message length (with wrapper)
-      let messageContent = '```ansi\n' + displayContent + '\n```';
+      // Plain text message (no code block wrapper)
+      let messageContent = displayContent;
 
       // If message exceeds limit, we need to split
       while (messageContent.length > maxMessageLength) {
-        // Find a safe split point - work backwards from a safe length
-        // Account for wrapper overhead
-        const safeLength = maxMessageLength - 20;
-        let splitPoint = Math.min(displayContent.length, safeLength);
+        // Find a safe split point
+        let splitPoint = Math.min(displayContent.length, maxMessageLength);
 
         // Find a newline to split at (avoid mid-line splits)
         const searchArea = displayContent.slice(0, splitPoint);
@@ -748,14 +681,13 @@ function startOutputPoller(sessionId: string, channel: TextChannel): void {
         }
 
         const chunkContent = displayContent.slice(0, splitPoint);
-        const chunkMessage = '```ansi\n' + chunkContent + '\n```';
 
         // Send or edit with this chunk
         if (state.responseMessage) {
           // Finalize current message with this chunk (no buttons)
           try {
             await state.responseMessage.edit({
-              content: chunkMessage,
+              content: chunkContent,
               components: [],
             });
           } catch (e) {
@@ -764,7 +696,7 @@ function startOutputPoller(sessionId: string, channel: TextChannel): void {
         } else {
           // Create new message with this chunk (no buttons - it's finalized)
           try {
-            await channel.send({ content: chunkMessage });
+            await channel.send({ content: chunkContent });
           } catch (e) {
             console.error('Failed to send chunk:', e);
           }
@@ -775,12 +707,7 @@ function startOutputPoller(sessionId: string, channel: TextChannel): void {
         state.responseMessage = null;
         displayContent = displayContent.slice(splitPoint).trim();
 
-        // Clean up orphaned ANSI at start of new chunk
-        if (displayContent.match(/^\[[0-9;]*m/)) {
-          displayContent = displayContent.replace(/^\[[0-9;]*m/, '');
-        }
-
-        messageContent = '```ansi\n' + displayContent + '\n```';
+        messageContent = displayContent;
       }
 
       // Build buttons - always include Stop button, plus prompt options if active

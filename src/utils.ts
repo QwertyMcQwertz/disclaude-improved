@@ -264,3 +264,280 @@ export function isUserAllowed(userId: string, allowedUsers: string[]): boolean {
   if (allowedUsers.length === 0) return true;
   return allowedUsers.includes(userId);
 }
+
+/**
+ * Output segment types for parsed Claude output
+ */
+export interface OutputSegment {
+  type: 'text' | 'tool_call' | 'tool_output' | 'prompt' | 'status' | 'discard';
+  content: string;
+  toolName?: string;
+  toolTarget?: string;
+}
+
+/**
+ * Tool name to emoji mapping
+ */
+const TOOL_EMOJI: Record<string, string> = {
+  'Bash': '⚡',
+  'Read': '📖',
+  'Edit': '✏️',
+  'Write': '📝',
+  'Glob': '🔍',
+  'Grep': '🔍',
+  'Task': '🤖',
+  'WebFetch': '🌐',
+  'WebSearch': '🔎',
+  'AskUserQuestion': '❓',
+};
+
+/**
+ * Strip ANSI codes from text
+ */
+function stripAnsi(text: string): string {
+  return text.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+/**
+ * Parse raw Claude Code terminal output into structured segments
+ * Only parses content AFTER the last user prompt marker
+ */
+export function parseClaudeOutput(raw: string): OutputSegment[] {
+  const segments: OutputSegment[] = [];
+  const lines = raw.split('\n');
+
+  // First, find the LAST user prompt line WITH CONTENT to only parse the current response
+  // Skip empty prompts like "❯ " which is just the input line
+  let startIdx = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const clean = stripAnsi(lines[i]).trim();
+    // User prompt: ❯ followed by actual text (not just whitespace)
+    // Must have more than just "❯ " - need actual user input
+    if (clean.startsWith('❯') && clean.replace(/^❯\s*/, '').length > 0) {
+      startIdx = i + 1;  // Start parsing AFTER this line
+      break;
+    }
+  }
+
+  let currentSegment: OutputSegment | null = null;
+  let inToolOutput = false;
+
+  for (let i = startIdx; i < lines.length; i++) {
+    const line = lines[i];
+    const clean = stripAnsi(line).trim();
+
+    // Skip empty lines (but we might want to preserve them in text)
+    if (!clean) {
+      if (currentSegment?.type === 'text') {
+        currentSegment.content += '\n';
+      }
+      continue;
+    }
+
+    // Discard: separator lines
+    if (/^[─━]{5,}$/.test(clean)) {
+      continue;
+    }
+
+    // Discard: status bar and terminal UI hints
+    if (clean.startsWith('⏵') || clean.includes('bypass permissions') ||
+        clean.includes('Context left') || clean.includes('shift+Tab') ||
+        clean.includes('ctrl+o') || clean.includes('ctrl+') ||
+        clean.includes('to expand') || clean.includes('? for shortcuts')) {
+      continue;
+    }
+
+    // Discard: any prompt line (❯ with anything)
+    if (clean.startsWith('❯')) {
+      continue;
+    }
+
+    // Tool output lines (│ prefix) - skip these
+    if (clean.startsWith('│') || clean.startsWith('|')) {
+      inToolOutput = true;
+      continue;
+    }
+
+    // Tool summary line: "Read 1 file", "Searched for 1 pattern", "Bash: /usr/bin/ls"
+    // These are the collapsed tool indicators Claude Code shows
+    const toolSummaryMatch = clean.match(/^●?\s*(Read|Edit|Write|Bash|Glob|Grep|Task|Searched)\s*[:(]?\s*(.*)$/i);
+    if (toolSummaryMatch) {
+      // Save previous segment
+      if (currentSegment) {
+        segments.push(currentSegment);
+      }
+
+      let toolName = toolSummaryMatch[1];
+      let toolTarget = toolSummaryMatch[2];
+
+      // Normalize tool name
+      if (toolName.toLowerCase() === 'searched') toolName = 'Grep';
+
+      // Clean up target - remove terminal hints
+      toolTarget = toolTarget
+        .replace(/\(ctrl\+[a-z] to expand\)/gi, '')
+        .replace(/\(.*to expand.*\)/gi, '')
+        .replace(/^\d+\s*(files?|patterns?)\s*/i, '')  // "1 file" -> ""
+        .replace(/["']/g, '')
+        .trim();
+
+      if (toolTarget.length > 50) {
+        toolTarget = toolTarget.slice(0, 47) + '...';
+      }
+
+      currentSegment = {
+        type: 'tool_call',
+        content: clean,
+        toolName,
+        toolTarget: toolTarget || undefined,
+      };
+      inToolOutput = true;
+      continue;
+    }
+
+    // Tool call line with parentheses: ● ToolName(...)
+    const toolCallMatch = clean.match(/^●?\s*(Bash|Read|Edit|Write|Glob|Grep|Task|WebFetch|WebSearch|AskUserQuestion)\s*\((.*)$/);
+    if (toolCallMatch) {
+      // Save previous segment
+      if (currentSegment) {
+        segments.push(currentSegment);
+      }
+
+      const toolName = toolCallMatch[1];
+      let toolTarget = toolCallMatch[2];
+
+      // Clean up the target
+      toolTarget = toolTarget.replace(/\)$/, '').replace(/["']/g, '').trim();
+      if (toolTarget.length > 50) {
+        toolTarget = toolTarget.slice(0, 47) + '...';
+      }
+
+      currentSegment = {
+        type: 'tool_call',
+        content: clean,
+        toolName,
+        toolTarget,
+      };
+      inToolOutput = true;
+      continue;
+    }
+
+    // Text response: ● followed by text (not a tool)
+    if (clean.startsWith('●')) {
+      // Save previous segment
+      if (currentSegment) {
+        segments.push(currentSegment);
+      }
+
+      const textContent = clean.replace(/^●\s*/, '');
+      currentSegment = {
+        type: 'text',
+        content: textContent,
+      };
+      inToolOutput = false;
+      continue;
+    }
+
+    // Continuation of text segment (no ● prefix, not in tool output)
+    if (currentSegment?.type === 'text' && !inToolOutput) {
+      currentSegment.content += '\n' + clean;
+    }
+  }
+
+  // Don't forget the last segment
+  if (currentSegment) {
+    segments.push(currentSegment);
+  }
+
+  return segments;
+}
+
+/**
+ * Format parsed segments for Discord output
+ */
+export function formatForDiscord(segments: OutputSegment[]): string {
+  const parts: string[] = [];
+  const toolCalls: OutputSegment[] = [];
+
+  for (const segment of segments) {
+    if (segment.type === 'text') {
+      // Flush any accumulated tool calls first
+      if (toolCalls.length > 0) {
+        parts.push(formatToolCallSummary(toolCalls));
+        toolCalls.length = 0;
+      }
+      // Add the text content
+      parts.push(segment.content.trim());
+    } else if (segment.type === 'tool_call') {
+      toolCalls.push(segment);
+    }
+    // Discard tool_output, prompt, status, discard types
+  }
+
+  // Flush remaining tool calls
+  if (toolCalls.length > 0) {
+    parts.push(formatToolCallSummary(toolCalls));
+  }
+
+  return parts.join('\n\n').trim();
+}
+
+/**
+ * Format a group of tool calls as a collapsed summary
+ */
+function formatToolCallSummary(calls: OutputSegment[]): string {
+  if (calls.length === 0) return '';
+
+  // Group by tool type
+  const grouped: Record<string, OutputSegment[]> = {};
+  for (const call of calls) {
+    const name = call.toolName || 'Unknown';
+    if (!grouped[name]) grouped[name] = [];
+    grouped[name].push(call);
+  }
+
+  const summaries: string[] = [];
+
+  for (const [toolName, toolCalls] of Object.entries(grouped)) {
+    const emoji = TOOL_EMOJI[toolName] || '🔧';
+
+    // Friendly names for display
+    const displayName: Record<string, string> = {
+      'Bash': 'Ran command',
+      'Read': 'Read file',
+      'Edit': 'Edited',
+      'Write': 'Created',
+      'Glob': 'Searched',
+      'Grep': 'Searched',
+      'Task': 'Spawned agent',
+    };
+    const friendly = displayName[toolName] || toolName;
+
+    if (toolCalls.length === 1) {
+      // Single call - show target if available
+      const target = toolCalls[0].toolTarget;
+      if (target) {
+        summaries.push(`${emoji} ${friendly}: \`${target}\``);
+      } else {
+        summaries.push(`${emoji} ${friendly}`);
+      }
+    } else if (toolCalls.length <= 3) {
+      // 2-3 calls - list them
+      const targets = toolCalls
+        .map(c => c.toolTarget)
+        .filter(Boolean)
+        .map(t => `\`${t}\``)
+        .join(', ');
+      if (targets) {
+        summaries.push(`${emoji} ${friendly}: ${targets}`);
+      } else {
+        summaries.push(`${emoji} ${friendly} ×${toolCalls.length}`);
+      }
+    } else {
+      // Many calls - just count
+      summaries.push(`${emoji} ${friendly} ×${toolCalls.length}`);
+    }
+  }
+
+  return summaries.join('\n');
+}
