@@ -644,8 +644,8 @@ function startOutputPoller(sessionId: string, channel: TextChannel): void {
         for (let i = lines.length - 1; i >= 0; i--) {
           const line = lines[i].trim();
 
-          // Regular messages: look for "> message"
-          if (line.startsWith('>') && line.includes(state.lastUserMessage.slice(0, 30))) {
+          // Regular messages: look for "❯ message" or "> message"
+          if ((line.startsWith('❯') || line.startsWith('>')) && line.includes(state.lastUserMessage.slice(0, 30))) {
             markerLineIdx = i;
             break;
           }
@@ -664,7 +664,7 @@ function startOutputPoller(sessionId: string, channel: TextChannel): void {
         if (markerLineIdx < 0) {
           for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
-            if (line.includes('⏺') || line.startsWith('│') || line.includes('Read(') || line.includes('Edit(') || line.includes('Bash(')) {
+            if (line.includes('⏺') || line.includes('●') || line.startsWith('│') || line.includes('Read(') || line.includes('Edit(') || line.includes('Bash(')) {
               markerLineIdx = Math.max(0, i - 1); // Start one line before
               break;
             }
@@ -677,8 +677,8 @@ function startOutputPoller(sessionId: string, channel: TextChannel): void {
           let responseStartIdx = markerLineIdx + 1;
           for (let i = markerLineIdx + 1; i < lines.length; i++) {
             const line = lines[i].trim();
-            // Claude's response typically starts with ⏺ or after blank lines
-            if (line.includes('⏺') || line.startsWith('│') || line.startsWith('⎯')) {
+            // Claude's response typically starts with ⏺ or ● or after blank lines
+            if (line.includes('⏺') || line.includes('●') || line.startsWith('│') || line.startsWith('⎯')) {
               responseStartIdx = i;
               break;
             }

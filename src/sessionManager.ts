@@ -100,7 +100,7 @@ class SessionManager {
         'new-session', '-d',
         '-s', tmuxName,
         '-c', resolvedDir,
-        'claude'
+        'claude', '--dangerously-skip-permissions'
       ], { stdio: 'pipe' });
 
       if (result.status !== 0) {
