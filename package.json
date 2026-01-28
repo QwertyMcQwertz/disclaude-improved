@@ -14,7 +14,7 @@
   },
   "keywords": [],
   "author": "Mike Burgh (https://github.com/disclaude)",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "description": "Discord bot for managing persistent Claude Code sessions",
   "repository": {
     "type": "git",
