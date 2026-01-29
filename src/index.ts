@@ -16,9 +16,21 @@ import {
   ActivityType,
   MessageFlags,
 } from 'discord.js';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import sessionManager, { setAllowedPaths, ensureSessionWorkspace, PersistedSession } from './sessionManager.js';
 import config from './config.js';
 import { parseClaudeOutput, formatForDiscord } from './utils.js';
+
+// Download a file from URL to local path
+async function downloadAttachment(url: string, destPath: string): Promise<void> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to download: ${response.status}`);
+  }
+  const buffer = await response.arrayBuffer();
+  writeFileSync(destPath, Buffer.from(buffer));
+}
 
 // Initialize allowed paths from config
 setAllowedPaths(config.allowedPaths);
@@ -1147,9 +1159,52 @@ client.on('messageCreate', async (message: Message) => {
     // Show typing indicator while Claude processes
     await (message.channel as TextChannel).sendTyping();
 
+    // Build message content
+    let textToSend = message.content;
+
+    // Handle image attachments
+    const imageAttachments = message.attachments.filter(a =>
+      a.contentType?.startsWith('image/')
+    );
+
+    if (imageAttachments.size > 0) {
+      const session = sessionManager.getSession(sessionId);
+      if (session) {
+        const imageDir = join(session.directory, '.disclaude-images');
+
+        // Ensure directory exists
+        if (!existsSync(imageDir)) {
+          mkdirSync(imageDir, { recursive: true });
+        }
+
+        const imagePaths: string[] = [];
+        for (const [, attachment] of imageAttachments) {
+          const filename = `${Date.now()}-${attachment.name}`;
+          const filepath = join(imageDir, filename);
+          await downloadAttachment(attachment.url, filepath);
+          imagePaths.push(filepath);
+        }
+
+        // Append image references to message
+        if (imagePaths.length === 1) {
+          textToSend = textToSend
+            ? `${textToSend}\n\n[Image attached: ${imagePaths[0]}]`
+            : `Please analyze this image: ${imagePaths[0]}`;
+        } else {
+          const imageList = imagePaths.map(p => `- ${p}`).join('\n');
+          textToSend = textToSend
+            ? `${textToSend}\n\n[Images attached:\n${imageList}]`
+            : `Please analyze these images:\n${imageList}`;
+        }
+      }
+    }
+
+    // Skip if nothing to send
+    if (!textToSend.trim()) return;
+
     // Mark that we're starting a new turn - response should be a new message
-    markUserInput(sessionId, message.content);
-    await sessionManager.sendToSession(sessionId, message.content);
+    markUserInput(sessionId, textToSend);
+    await sessionManager.sendToSession(sessionId, textToSend);
   } catch (error) {
     botLog('error', `Failed to send message to session: ${(error as Error).message}`);
     await message.reply({
