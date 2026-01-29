@@ -83,10 +83,10 @@ DISCORD_GUILD_ID=your_server_id            # Right-click server → Copy Server 
 ALLOWED_USERS=your_discord_user_id         # Right-click yourself → Copy User ID
 
 # Note: Enable Developer Mode in Discord (Settings → Advanced) to see "Copy ID" options
-ALLOWED_PATHS=~/projects,~/work
+ALLOWED_PATHS=~/disco
 
 # Optional
-DEFAULT_DIRECTORY=~/projects
+DEFAULT_DIRECTORY=~/disco
 CATEGORY_NAME=Disco Demon
 MESSAGE_RETENTION_DAYS=7
 RATE_LIMIT_MS=1000
@@ -197,7 +197,7 @@ Get your user ID: Discord Settings → Advanced → Developer Mode → right-cli
 Limit which directories sessions can be created in:
 
 ```bash
-ALLOWED_PATHS=~/projects,~/work
+ALLOWED_PATHS=~/disco
 ```
 
 Claude can still read/write anywhere, but at least you control where sessions start.
