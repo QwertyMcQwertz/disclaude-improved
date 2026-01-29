@@ -270,6 +270,11 @@ class SessionManager {
       // Send keys to the tmux session using a temp file to avoid escaping issues
       const escapedText = text.replace(/'/g, "'\\''");
       execSync(`tmux send-keys -t "${tmuxName}" -l '${escapedText}'`, { stdio: 'pipe' });
+
+      // Wait for tmux buffer to process before sending Enter
+      // Prevents race condition where Enter is lost on fast dispatch
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
       execSync(`tmux send-keys -t "${tmuxName}" Enter`, { stdio: 'pipe' });
 
       return true;
