@@ -10,6 +10,9 @@ vi.mock('child_process', () => ({
 
 vi.mock('fs', () => ({
   existsSync: vi.fn(),
+  mkdirSync: vi.fn(),
+  writeFileSync: vi.fn(),
+  readFileSync: vi.fn(() => '# Mock template'),
 }));
 
 // Import after mocking
@@ -18,8 +21,6 @@ const { sessionManager, setAllowedPaths } = await import('../src/sessionManager.
 describe('SessionManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset internal state by clearing maps through the public API
-    // We'll test with fresh state each time
   });
 
   describe('checkTmux', () => {
@@ -37,15 +38,25 @@ describe('SessionManager', () => {
   });
 
   describe('getTmuxName', () => {
-    it('should prefix session ID with "claude-"', () => {
-      expect(sessionManager.getTmuxName('myproject')).toBe('claude-myproject');
+    it('should prefix session ID with "disco_"', () => {
+      expect(sessionManager.getTmuxName('guild123_channel456')).toBe('disco_guild123_channel456');
+    });
+  });
+
+  describe('getSessionIdFromTmuxName', () => {
+    it('should extract session ID from tmux name', () => {
+      expect(sessionManager.getSessionIdFromTmuxName('disco_guild123_channel456')).toBe('guild123_channel456');
+    });
+
+    it('should return null for non-disco sessions', () => {
+      expect(sessionManager.getSessionIdFromTmuxName('other-session')).toBeNull();
     });
   });
 
   describe('sessionExists', () => {
     it('should return true when session exists', () => {
       vi.mocked(execSync).mockReturnValueOnce(Buffer.from(''));
-      expect(sessionManager.sessionExists('test')).toBe(true);
+      expect(sessionManager.sessionExists('guild_channel')).toBe(true);
     });
 
     it('should return false when session does not exist', () => {
@@ -56,21 +67,43 @@ describe('SessionManager', () => {
     });
   });
 
+  describe('sessionExistsForChannel', () => {
+    it('should check session exists for guild/channel combo', () => {
+      vi.mocked(execSync).mockReturnValueOnce(Buffer.from(''));
+      expect(sessionManager.sessionExistsForChannel('guild123', 'channel456')).toBe(true);
+    });
+  });
+
+  describe('getSessionIdForChannel', () => {
+    it('should return session ID when session exists', () => {
+      vi.mocked(execSync).mockReturnValueOnce(Buffer.from(''));
+      expect(sessionManager.getSessionIdForChannel('guild123', 'channel456')).toBe('guild123_channel456');
+    });
+
+    it('should return null when session does not exist', () => {
+      vi.mocked(execSync).mockImplementationOnce(() => {
+        throw new Error('no session');
+      });
+      expect(sessionManager.getSessionIdForChannel('guild123', 'channel456')).toBeNull();
+    });
+  });
+
   describe('createSession', () => {
-    it('should create a new tmux session', async () => {
+    it('should create a new tmux session with convention naming', async () => {
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(execSync)
         .mockImplementationOnce(() => { throw new Error('no session'); }); // sessionExists check
       vi.mocked(spawnSync).mockReturnValueOnce({ status: 0 } as any); // tmux new-session
 
-      const result = await sessionManager.createSession('test', '/tmp', 'channel123');
+      const result = await sessionManager.createSession('guild123', 'channel456', '/tmp');
 
       expect(result).toMatchObject({
-        id: 'test',
-        tmuxName: 'claude-test',
+        id: 'guild123_channel456',
+        tmuxName: 'disco_guild123_channel456',
         directory: '/tmp',
-        channelId: 'channel123',
-        attachCommand: 'tmux attach -t claude-test',
+        guildId: 'guild123',
+        channelId: 'channel456',
+        attachCommand: 'tmux attach -t disco_guild123_channel456',
       });
     });
 
@@ -78,7 +111,7 @@ describe('SessionManager', () => {
       vi.mocked(existsSync).mockReturnValue(false);
 
       await expect(
-        sessionManager.createSession('test', '/nonexistent', 'channel123')
+        sessionManager.createSession('guild', 'channel', '/nonexistent')
       ).rejects.toThrow('Directory does not exist');
     });
 
@@ -87,7 +120,7 @@ describe('SessionManager', () => {
       vi.mocked(execSync).mockReturnValueOnce(Buffer.from('')); // sessionExists returns true
 
       await expect(
-        sessionManager.createSession('test', '/tmp', 'channel123')
+        sessionManager.createSession('guild', 'channel', '/tmp')
       ).rejects.toThrow('already exists');
     });
 
@@ -97,71 +130,45 @@ describe('SessionManager', () => {
         .mockImplementationOnce(() => { throw new Error('no session'); }); // sessionExists check
       vi.mocked(spawnSync).mockReturnValueOnce({ status: 0 } as any); // tmux new-session
 
-      const result = await sessionManager.createSession('test2', '~/projects', 'channel123');
+      const result = await sessionManager.createSession('guild', 'channel', '~/projects');
 
       expect(result.directory).not.toContain('~');
       expect(result.directory).toMatch(/^\/.*projects$/);
     });
   });
 
-  describe('linkChannel', () => {
-    it('should link a session to a channel', () => {
-      sessionManager.linkChannel('test-session', 'channel-456');
-      expect(sessionManager.getChannelBySession('test-session')).toBe('channel-456');
-      expect(sessionManager.getSessionByChannel('channel-456')).toBe('test-session');
-    });
-  });
-
-  describe('getSessionByChannel', () => {
-    it('should return session ID for linked channel', () => {
-      sessionManager.linkChannel('my-session', 'my-channel');
-      expect(sessionManager.getSessionByChannel('my-channel')).toBe('my-session');
-    });
-
-    it('should return undefined for unlinked channel', () => {
-      expect(sessionManager.getSessionByChannel('unknown-channel')).toBeUndefined();
-    });
-  });
-
-  describe('unlinkChannel', () => {
-    it('should remove channel mapping', () => {
-      sessionManager.linkChannel('session-x', 'channel-x');
-      expect(sessionManager.getSessionByChannel('channel-x')).toBe('session-x');
-
-      sessionManager.unlinkChannel('channel-x');
-      expect(sessionManager.getSessionByChannel('channel-x')).toBeUndefined();
-      expect(sessionManager.getChannelBySession('session-x')).toBeUndefined();
-    });
-  });
-
   describe('listSessions', () => {
-    it('should parse tmux list-sessions output', () => {
-      const mockOutput = 'claude-project1|1700000000|/home/user/project1\nclaude-project2|1700000001|/home/user/project2';
+    it('should parse tmux list-sessions output with convention naming', () => {
+      const mockOutput = 'disco_guild1_chan1|1700000000|/home/user/project1\ndisco_guild2_chan2|1700000001|/home/user/project2';
       vi.mocked(execSync).mockReturnValueOnce(mockOutput as unknown as Buffer);
 
       const sessions = sessionManager.listSessions();
 
       expect(sessions).toHaveLength(2);
       expect(sessions[0]).toMatchObject({
-        id: 'project1',
-        tmuxName: 'claude-project1',
+        id: 'guild1_chan1',
+        tmuxName: 'disco_guild1_chan1',
         directory: '/home/user/project1',
+        guildId: 'guild1',
+        channelId: 'chan1',
       });
       expect(sessions[1]).toMatchObject({
-        id: 'project2',
-        tmuxName: 'claude-project2',
+        id: 'guild2_chan2',
+        tmuxName: 'disco_guild2_chan2',
         directory: '/home/user/project2',
+        guildId: 'guild2',
+        channelId: 'chan2',
       });
     });
 
-    it('should filter out non-claude sessions', () => {
-      const mockOutput = 'claude-myproject|1700000000|/tmp\nother-session|1700000001|/home';
+    it('should filter out non-disco sessions', () => {
+      const mockOutput = 'disco_guild_channel|1700000000|/tmp\nother-session|1700000001|/home';
       vi.mocked(execSync).mockReturnValueOnce(mockOutput as unknown as Buffer);
 
       const sessions = sessionManager.listSessions();
 
       expect(sessions).toHaveLength(1);
-      expect(sessions[0].id).toBe('myproject');
+      expect(sessions[0].id).toBe('guild_channel');
     });
 
     it('should return empty array on error', () => {
@@ -174,13 +181,13 @@ describe('SessionManager', () => {
   });
 
   describe('sendToSession', () => {
-    it('should send keys to tmux session', async () => {
+    it('should send keys to tmux session with delay before Enter', async () => {
       vi.mocked(execSync)
         .mockReturnValueOnce(Buffer.from('')) // sessionExists
         .mockReturnValueOnce(Buffer.from('')) // send-keys -l
         .mockReturnValueOnce(Buffer.from('')); // send-keys Enter
 
-      await sessionManager.sendToSession('test', 'hello world');
+      await sessionManager.sendToSession('guild_channel', 'hello world');
 
       expect(execSync).toHaveBeenCalledWith(
         expect.stringContaining('send-keys'),
@@ -218,7 +225,7 @@ describe('SessionManager', () => {
       const mockOutput = '\x1b[32mGreen text\x1b[0m\nMore content';
       vi.mocked(execSync)
         .mockReturnValueOnce(Buffer.from('')) // sessionExists
-        .mockReturnValueOnce(mockOutput as unknown as Buffer); // capture-pane (returns string with encoding)
+        .mockReturnValueOnce(mockOutput as unknown as Buffer); // capture-pane
 
       const output = sessionManager.captureOutput('test', 100);
 
@@ -251,19 +258,14 @@ describe('SessionManager', () => {
   });
 
   describe('killSession', () => {
-    it('should kill tmux session and clean up mappings', async () => {
-      // Setup: create a linked session
-      sessionManager.linkChannel('kill-test', 'kill-channel');
-
+    it('should kill tmux session', async () => {
       vi.mocked(execSync)
         .mockReturnValueOnce(Buffer.from('')) // sessionExists
         .mockReturnValueOnce(Buffer.from('')); // kill-session
 
-      const result = await sessionManager.killSession('kill-test');
+      const result = await sessionManager.killSession('guild_channel');
 
       expect(result).toBe(true);
-      expect(sessionManager.getChannelBySession('kill-test')).toBeUndefined();
-      expect(sessionManager.getSessionByChannel('kill-channel')).toBeUndefined();
     });
 
     it('should throw if session does not exist', async () => {
@@ -276,18 +278,20 @@ describe('SessionManager', () => {
   });
 
   describe('getSession', () => {
-    it('should return session info', () => {
-      const mockOutput = 'claude-info-test|1700000000|/home/user/project';
+    it('should return session info with parsed guildId/channelId', () => {
+      const mockOutput = 'disco_guild123_channel456|1700000000|/home/user/project';
       vi.mocked(execSync)
         .mockReturnValueOnce(Buffer.from('')) // sessionExists
-        .mockReturnValueOnce(mockOutput as unknown as Buffer); // list-sessions (returns string with encoding)
+        .mockReturnValueOnce(mockOutput as unknown as Buffer); // list-sessions
 
-      const session = sessionManager.getSession('info-test');
+      const session = sessionManager.getSession('guild123_channel456');
 
       expect(session).toMatchObject({
-        id: 'info-test',
-        tmuxName: 'claude-info-test',
+        id: 'guild123_channel456',
+        tmuxName: 'disco_guild123_channel456',
         directory: '/home/user/project',
+        guildId: 'guild123',
+        channelId: 'channel456',
       });
     });
 
@@ -300,10 +304,25 @@ describe('SessionManager', () => {
     });
   });
 
+  describe('getSessionForChannel', () => {
+    it('should get session info by guildId and channelId', () => {
+      const mockOutput = 'disco_guild_channel|1700000000|/tmp';
+      vi.mocked(execSync)
+        .mockReturnValueOnce(Buffer.from('')) // sessionExists
+        .mockReturnValueOnce(mockOutput as unknown as Buffer); // list-sessions
+
+      const session = sessionManager.getSessionForChannel('guild', 'channel');
+
+      expect(session).toMatchObject({
+        guildId: 'guild',
+        channelId: 'channel',
+      });
+    });
+  });
+
   // Security tests
   describe('Security: Path Restrictions', () => {
     afterEach(() => {
-      // Reset allowed paths after each test
       setAllowedPaths([]);
     });
 
@@ -313,7 +332,7 @@ describe('SessionManager', () => {
       vi.mocked(execSync).mockImplementationOnce(() => { throw new Error('no session'); });
       vi.mocked(spawnSync).mockReturnValueOnce({ status: 0 } as any);
 
-      const result = await sessionManager.createSession('unrestricted', '/any/path', 'channel1');
+      const result = await sessionManager.createSession('guild', 'channel', '/any/path');
       expect(result.directory).toBe('/any/path');
     });
 
@@ -322,7 +341,7 @@ describe('SessionManager', () => {
       vi.mocked(existsSync).mockReturnValue(true);
 
       await expect(
-        sessionManager.createSession('blocked', '/etc/passwd', 'channel1')
+        sessionManager.createSession('guild', 'channel', '/etc/passwd')
       ).rejects.toThrow('Directory not in allowed paths');
     });
 
@@ -332,7 +351,7 @@ describe('SessionManager', () => {
       vi.mocked(execSync).mockImplementationOnce(() => { throw new Error('no session'); });
       vi.mocked(spawnSync).mockReturnValueOnce({ status: 0 } as any);
 
-      const result = await sessionManager.createSession('allowed', '/home/user/projects/myapp', 'channel1');
+      const result = await sessionManager.createSession('guild', 'channel', '/home/user/projects/myapp');
       expect(result.directory).toBe('/home/user/projects/myapp');
     });
 
@@ -342,7 +361,7 @@ describe('SessionManager', () => {
       vi.mocked(execSync).mockImplementationOnce(() => { throw new Error('no session'); });
       vi.mocked(spawnSync).mockReturnValueOnce({ status: 0 } as any);
 
-      const result = await sessionManager.createSession('exact', '/home/user/projects', 'channel1');
+      const result = await sessionManager.createSession('guild', 'channel', '/home/user/projects');
       expect(result.directory).toBe('/home/user/projects');
     });
 
@@ -350,9 +369,8 @@ describe('SessionManager', () => {
       setAllowedPaths(['/home/user/projects']);
       vi.mocked(existsSync).mockReturnValue(true);
 
-      // /home/user/projects-evil starts with /home/user/projects but is not inside it
       await expect(
-        sessionManager.createSession('sneaky', '/home/user/projects-evil', 'channel1')
+        sessionManager.createSession('guild', 'channel', '/home/user/projects-evil')
       ).rejects.toThrow('Directory not in allowed paths');
     });
 
@@ -362,10 +380,10 @@ describe('SessionManager', () => {
       vi.mocked(execSync).mockImplementation(() => { throw new Error('no session'); });
       vi.mocked(spawnSync).mockReturnValue({ status: 0 } as any);
 
-      const result1 = await sessionManager.createSession('multi1', '/home/user/projects/app1', 'ch1');
+      const result1 = await sessionManager.createSession('guild1', 'chan1', '/home/user/projects/app1');
       expect(result1.directory).toBe('/home/user/projects/app1');
 
-      const result2 = await sessionManager.createSession('multi2', '/var/www/site', 'ch2');
+      const result2 = await sessionManager.createSession('guild2', 'chan2', '/var/www/site');
       expect(result2.directory).toBe('/var/www/site');
     });
   });
@@ -377,13 +395,18 @@ describe('SessionManager', () => {
       vi.mocked(execSync).mockImplementationOnce(() => { throw new Error('no session'); });
       vi.mocked(spawnSync).mockReturnValueOnce({ status: 0 } as any);
 
-      await sessionManager.createSession('safe', '/tmp/test', 'channel1');
+      await sessionManager.createSession('guild', 'channel', '/tmp/test');
 
       // Verify spawnSync was called with separate arguments (safe)
-      // NOT with a single interpolated string (vulnerable)
       expect(spawnSync).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'claude-safe', '-c', '/tmp/test', 'claude'],
+        expect.arrayContaining([
+          'new-session', '-d',
+          '-x', '200', '-y', '50',
+          '-s', 'disco_guild_channel',
+          '-c', '/tmp/test',
+          'claude', '--dangerously-skip-permissions'
+        ]),
         expect.any(Object)
       );
     });
@@ -394,15 +417,13 @@ describe('SessionManager', () => {
       vi.mocked(execSync).mockImplementationOnce(() => { throw new Error('no session'); });
       vi.mocked(spawnSync).mockReturnValueOnce({ status: 0 } as any);
 
-      // This malicious path would execute `rm -rf /` if interpolated into a shell command
       const maliciousPath = '/tmp/$(whoami)';
-      await sessionManager.createSession('inject', maliciousPath, 'channel1');
+      await sessionManager.createSession('guild', 'channel', maliciousPath);
 
       // With spawnSync argument array, the path is passed as a single argument
-      // The shell metacharacters are NOT interpreted
       expect(spawnSync).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'claude-inject', '-c', maliciousPath, 'claude'],
+        expect.arrayContaining(['-c', maliciousPath]),
         expect.any(Object)
       );
     });

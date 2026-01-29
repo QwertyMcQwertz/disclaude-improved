@@ -18,7 +18,7 @@ import {
 } from 'discord.js';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import sessionManager, { setAllowedPaths, ensureSessionWorkspace, PersistedSession } from './sessionManager.js';
+import sessionManager, { setAllowedPaths, ensureSessionWorkspace } from './sessionManager.js';
 import config from './config.js';
 import { parseClaudeOutput, formatForDiscord } from './utils.js';
 
@@ -281,85 +281,52 @@ async function getOrCreateCategory(guild: Guild): Promise<CategoryChannel> {
   return category;
 }
 
-// Sync orphaned sessions to channels
-async function syncSessions(guild: Guild): Promise<{ linked: string[]; created: string[] }> {
+// Reconnect sessions on bot startup
+// With convention naming, channelId is embedded in tmux session name
+async function syncSessions(guild: Guild): Promise<{ reconnected: string[]; orphaned: string[] }> {
   const sessions = sessionManager.listSessions();
-  const linked: string[] = [];
-  const created: string[] = [];
+  const reconnected: string[] = [];
+  const orphaned: string[] = [];
 
   for (const session of sessions) {
-    // Skip if already linked
-    if (session.channelId) {
-      // Verify channel still exists
-      try {
-        const channel = await guild.channels.fetch(session.channelId);
-        if (channel) {
-          // Re-link and start poller
-          sessionManager.linkChannel(session.id, session.channelId);
-          if (!outputStates.has(session.id)) {
-            startOutputPoller(session.id, channel as TextChannel);
-          }
-          continue;
-        }
-      } catch {
-        // Channel doesn't exist, need to re-link
-      }
+    // channelId is parsed from the tmux session name (disco_{guildId}_{channelId})
+    if (!session.channelId) {
+      // Shouldn't happen with convention naming, but handle gracefully
+      orphaned.push(session.id);
+      continue;
     }
 
-    // Look for matching channel by name
-    const expectedChannelName = `claude-${session.id}`;
-    const existingChannel = guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildText && c.name === expectedChannelName
-    ) as TextChannel | undefined;
+    // Verify Discord channel still exists
+    try {
+      const channel = await guild.channels.fetch(session.channelId);
+      if (channel && channel.type === ChannelType.GuildText) {
+        // Start poller for this session
+        if (!outputStates.has(session.id)) {
+          startOutputPoller(session.id, channel as TextChannel);
+        }
+        reconnected.push(session.id);
 
-    if (existingChannel) {
-      // Link to existing channel
-      sessionManager.linkChannel(session.id, existingChannel.id);
-      startOutputPoller(session.id, existingChannel);
-      linked.push(session.id);
-
-      // Send reconnection message
-      await existingChannel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('Session Reconnected')
-            .setColor(0x22c55e)
-            .setDescription('Bot restarted - session has been reconnected to this channel.')
-            .setTimestamp(),
-        ],
-      });
-    } else {
-      // Create new channel for orphaned session
-      const category = await getOrCreateCategory(guild);
-      const newChannel = await guild.channels.create({
-        name: expectedChannelName,
-        type: ChannelType.GuildText,
-        parent: category.id,
-        topic: `Claude Code session | Directory: ${session.directory} | Attach: ${session.attachCommand}`,
-      });
-
-      sessionManager.linkChannel(session.id, newChannel.id);
-      startOutputPoller(session.id, newChannel);
-      created.push(session.id);
-
-      // Send welcome message
-      await newChannel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('Orphaned Session Adopted')
-            .setColor(0x7c3aed)
-            .addFields(
-              { name: 'Directory', value: `\`${session.directory}\``, inline: false },
-              { name: 'Attach via Terminal', value: `\`${session.attachCommand}\``, inline: false }
-            )
-            .setDescription('Found an existing tmux session and created this channel for it.\nJust type to talk to Claude.')
-            .setTimestamp(),
-        ],
-      });
+        // Send reconnection message
+        await (channel as TextChannel).send({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('Session Reconnected')
+              .setColor(0x22c55e)
+              .setDescription('Bot restarted - session has been reconnected to this channel.')
+              .setTimestamp(),
+          ],
+        });
+      } else {
+        // Channel exists but wrong type
+        orphaned.push(session.id);
+      }
+    } catch {
+      // Channel no longer exists - session is orphaned
+      orphaned.push(session.id);
     }
   }
 
-  return { linked, created };
+  return { reconnected, orphaned };
 }
 
 // Clean for comparison (strip ANSI)
@@ -763,15 +730,24 @@ client.on('interactionCreate', async (interaction) => {
         const cleanName = name.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 50);
         const category = await getOrCreateCategory(interaction.guild!);
 
+        // Create Discord channel with friendly name
         const channel = await interaction.guild!.channels.create({
           name: `claude-${cleanName}`,
           type: ChannelType.GuildText,
           parent: category.id,
-          topic: `Claude Code session | Directory: ${directory} | Attach: tmux attach -t claude-${cleanName}`,
         });
 
-        const session = await sessionManager.createSession(cleanName, directory, channel.id);
-        startOutputPoller(cleanName, channel);
+        // Create session - name is derived from guildId + channelId
+        const session = await sessionManager.createSession(
+          interaction.guildId!,
+          channel.id,
+          directory
+        );
+
+        // Update channel topic with actual tmux session name
+        await channel.setTopic(`Claude Code session | Directory: ${directory} | Attach: ${session.attachCommand}`);
+
+        startOutputPoller(session.id, channel);
 
         await channel.send({
           embeds: [
@@ -791,7 +767,7 @@ client.on('interactionCreate', async (interaction) => {
           content: `Session created! Head to ${channel} to start chatting with Claude.`,
         });
 
-        botLog('info', `Session **${cleanName}** created by ${interaction.user.tag}`);
+        botLog('info', `Session **${cleanName}** (${session.tmuxName}) created by ${interaction.user.tag}`);
         updateBotStatus();
         break;
       }
@@ -850,15 +826,15 @@ client.on('interactionCreate', async (interaction) => {
           .setColor(0x22c55e)
           .setTimestamp();
 
-        if (result.linked.length === 0 && result.created.length === 0) {
-          embed.setDescription('All sessions are already synced.');
+        if (result.reconnected.length === 0 && result.orphaned.length === 0) {
+          embed.setDescription('No sessions found.');
         } else {
           const parts: string[] = [];
-          if (result.linked.length > 0) {
-            parts.push(`**Re-linked:** ${result.linked.join(', ')}`);
+          if (result.reconnected.length > 0) {
+            parts.push(`**Reconnected:** ${result.reconnected.length} session(s)`);
           }
-          if (result.created.length > 0) {
-            parts.push(`**Created channels:** ${result.created.join(', ')}`);
+          if (result.orphaned.length > 0) {
+            parts.push(`**Orphaned (channel deleted):** ${result.orphaned.join(', ')}`);
           }
           embed.setDescription(parts.join('\n'));
         }
@@ -868,8 +844,7 @@ client.on('interactionCreate', async (interaction) => {
       }
 
       case 'end': {
-        const channelId = interaction.channelId;
-        const sessionId = sessionManager.getSessionByChannel(channelId);
+        const sessionId = sessionManager.getSessionIdForChannel(interaction.guildId!, interaction.channelId);
 
         if (!sessionId) {
           await interaction.reply({
@@ -902,8 +877,7 @@ client.on('interactionCreate', async (interaction) => {
       }
 
       case 'output': {
-        const channelId = interaction.channelId;
-        const sessionId = sessionManager.getSessionByChannel(channelId);
+        const sessionId = sessionManager.getSessionIdForChannel(interaction.guildId!, interaction.channelId);
 
         if (!sessionId) {
           await interaction.reply({
@@ -927,8 +901,7 @@ client.on('interactionCreate', async (interaction) => {
       }
 
       case 'attach': {
-        const channelId = interaction.channelId;
-        const sessionId = sessionManager.getSessionByChannel(channelId);
+        const sessionId = sessionManager.getSessionIdForChannel(interaction.guildId!, interaction.channelId);
 
         if (!sessionId) {
           await interaction.reply({
@@ -963,8 +936,7 @@ client.on('interactionCreate', async (interaction) => {
       }
 
       case 'stop': {
-        const channelId = interaction.channelId;
-        const sessionId = sessionManager.getSessionByChannel(channelId);
+        const sessionId = sessionManager.getSessionIdForChannel(interaction.guildId!, interaction.channelId);
 
         if (!sessionId) {
           await interaction.reply({
@@ -1014,7 +986,7 @@ client.on('interactionCreate', async (interaction) => {
   const [type, sessionId, choice] = interaction.customId.split('_');
 
   // Verify the session belongs to this channel (prevent cross-channel attacks)
-  const expectedSession = sessionManager.getSessionByChannel(interaction.channelId);
+  const expectedSession = sessionManager.getSessionIdForChannel(interaction.guildId!, interaction.channelId);
   if (expectedSession !== sessionId) {
     await interaction.reply({
       content: 'Session mismatch - this button is not valid for this channel.',
@@ -1055,11 +1027,12 @@ client.on('messageCreate', async (message: Message) => {
   // Check user whitelist
   if (!isUserAllowed(message.author.id)) return;
 
-  const sessionId = sessionManager.getSessionByChannel(message.channelId);
+  if (!message.guildId) return;
+  const sessionId = sessionManager.getSessionIdForChannel(message.guildId, message.channelId);
   if (!sessionId) return;
 
+  // Session ID is derived from channel ID, so if it exists, tmux session should too
   if (!sessionManager.sessionExists(sessionId)) {
-    sessionManager.unlinkChannel(message.channelId);
     return;
   }
 
@@ -1134,10 +1107,10 @@ client.on('messageCreate', async (message: Message) => {
 // Handle channel deletion
 client.on('channelDelete', (channel) => {
   if (channel.type === ChannelType.GuildText) {
-    const sessionId = sessionManager.getSessionByChannel(channel.id);
+    const textChannel = channel as TextChannel;
+    const sessionId = sessionManager.getSessionIdForChannel(textChannel.guildId, textChannel.id);
     if (sessionId) {
       stopOutputPoller(sessionId);
-      sessionManager.unlinkChannel(channel.id);
       sessionStats.delete(sessionId);
       if (sessionManager.sessionExists(sessionId)) {
         sessionManager.killSession(sessionId).catch((e) => botLog('error', `Failed to kill session: ${e.message}`));
@@ -1257,22 +1230,15 @@ client.once('ready', async () => {
       // Set initial bot status
       updateBotStatus();
 
-      // Restore persisted sessions first (before auto-sync)
-      const restored = sessionManager.restoreSessions();
-      for (const session of restored) {
-        // Verify Discord channel still exists
-        const channel = await client.channels.fetch(session.channelId).catch(() => null);
-        if (channel && channel.type === ChannelType.GuildText) {
-          startOutputPoller(session.id, channel as TextChannel);
-          botLog('info', `Restored session: ${session.id} -> <#${session.channelId}>`);
-        }
-      }
-      if (restored.length > 0) {
-        botLog('info', `Restored ${restored.length} persisted session(s)`);
-      }
-
+      // Reconnect existing tmux sessions to their Discord channels
+      // With convention naming, channelId is embedded in tmux session name
       const result = await syncSessions(guild);
-      botLog('info', `Auto-sync: linked ${result.linked.length}, created ${result.created.length} channels`);
+      if (result.reconnected.length > 0) {
+        botLog('info', `Reconnected ${result.reconnected.length} session(s)`);
+      }
+      if (result.orphaned.length > 0) {
+        botLog('warn', `Orphaned sessions (channel deleted): ${result.orphaned.join(', ')}`);
+      }
 
       // Update status after sync (session count may have changed)
       updateBotStatus();

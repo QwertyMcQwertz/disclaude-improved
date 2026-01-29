@@ -9,16 +9,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const TEMPLATE_PATH = join(__dirname, '..', 'config', 'session-claude.md');
 
-// Persistence file path
-const SESSIONS_FILE = join(homedir(), '.disclaude', 'sessions.json');
-
-// Interface for persisted session data
-export interface PersistedSession {
-  id: string;
-  channelId: string;
-  directory: string;
-  tmuxName: string;
-}
+// Session prefix - tmux sessions are named disco_{guildId}_{channelId}
+const SESSION_PREFIX = 'disco_';
 
 /**
  * Read session CLAUDE.md template and strip HTML comments
@@ -77,31 +69,34 @@ function isPathAllowed(targetPath: string): boolean {
   return allowedPaths.some(allowed => resolved.startsWith(allowed + '/') || resolved === allowed);
 }
 
-const SESSION_PREFIX = 'claude-';
-
-export interface Session {
-  id: string;
-  tmuxName: string;
-  directory: string;
-  channelId: string;
-  createdAt: Date;
-}
-
 export interface SessionInfo {
-  id: string;
-  tmuxName: string;
+  id: string;           // Format: {guildId}_{channelId}
+  tmuxName: string;     // Format: disco_{guildId}_{channelId}
   directory: string;
-  channelId?: string;
+  guildId: string;
+  channelId: string;
   attachCommand: string;
   createdAt: Date | null;
 }
 
+/**
+ * Generate session ID from Discord IDs
+ */
+function makeSessionId(guildId: string, channelId: string): string {
+  return `${guildId}_${channelId}`;
+}
+
+/**
+ * Parse guildId and channelId from session ID
+ */
+function parseSessionId(sessionId: string): { guildId: string; channelId: string } | null {
+  const parts = sessionId.split('_');
+  if (parts.length !== 2) return null;
+  return { guildId: parts[0], channelId: parts[1] };
+}
+
 class SessionManager {
-  // Maps session ID -> channel ID
-  private channelMap = new Map<string, string>();
-  // Maps channel ID -> session ID (reverse lookup)
-  private reverseMap = new Map<string, string>();
-  // Track last captured output for diff detection
+  // Track last captured output for diff detection (keyed by sessionId)
   private lastOutput = new Map<string, string>();
 
   /**
@@ -124,13 +119,23 @@ class SessionManager {
   }
 
   /**
+   * Get session ID from tmux name
+   */
+  getSessionIdFromTmuxName(tmuxName: string): string | null {
+    if (!tmuxName.startsWith(SESSION_PREFIX)) return null;
+    return tmuxName.slice(SESSION_PREFIX.length);
+  }
+
+  /**
    * Create a new Claude Code session in tmux
+   * Session name is derived from guildId + channelId (convention-based)
    */
   async createSession(
-    sessionId: string,
-    directory: string,
-    channelId: string
+    guildId: string,
+    channelId: string,
+    directory: string
   ): Promise<SessionInfo> {
+    const sessionId = makeSessionId(guildId, channelId);
     const tmuxName = this.getTmuxName(sessionId);
 
     // Expand ~ to home directory, then resolve
@@ -150,7 +155,7 @@ class SessionManager {
 
     // Check if session already exists
     if (this.sessionExists(sessionId)) {
-      throw new Error(`Session "${sessionId}" already exists`);
+      throw new Error(`Session for this channel already exists`);
     }
 
     try {
@@ -169,17 +174,11 @@ class SessionManager {
         throw new Error(result.stderr?.toString() || 'tmux command failed');
       }
 
-      // Store channel mapping
-      this.channelMap.set(sessionId, channelId);
-      this.reverseMap.set(channelId, sessionId);
-
-      // Persist to disk
-      this.saveSessionsToFile();
-
       return {
         id: sessionId,
         directory: resolvedDir,
         tmuxName,
+        guildId,
         channelId,
         attachCommand: `tmux attach -t ${tmuxName}`,
         createdAt: new Date(),
@@ -190,7 +189,7 @@ class SessionManager {
   }
 
   /**
-   * Check if a tmux session exists
+   * Check if a tmux session exists by session ID
    */
   sessionExists(sessionId: string): boolean {
     const tmuxName = this.getTmuxName(sessionId);
@@ -203,30 +202,22 @@ class SessionManager {
   }
 
   /**
-   * Link an existing tmux session to a channel
+   * Check if a session exists for a Discord channel
    */
-  linkChannel(sessionId: string, channelId: string): void {
-    this.channelMap.set(sessionId, channelId);
-    this.reverseMap.set(channelId, sessionId);
-    this.saveSessionsToFile();
+  sessionExistsForChannel(guildId: string, channelId: string): boolean {
+    return this.sessionExists(makeSessionId(guildId, channelId));
   }
 
   /**
-   * Get session ID from channel ID
+   * Get session ID for a Discord channel (if session exists)
    */
-  getSessionByChannel(channelId: string): string | undefined {
-    return this.reverseMap.get(channelId);
+  getSessionIdForChannel(guildId: string, channelId: string): string | null {
+    const sessionId = makeSessionId(guildId, channelId);
+    return this.sessionExists(sessionId) ? sessionId : null;
   }
 
   /**
-   * Get channel ID from session ID
-   */
-  getChannelBySession(sessionId: string): string | undefined {
-    return this.channelMap.get(sessionId);
-  }
-
-  /**
-   * List all Claude Code tmux sessions
+   * List all disco-demon tmux sessions
    */
   listSessions(): SessionInfo[] {
     try {
@@ -241,12 +232,14 @@ class SessionManager {
         .filter((line) => line.startsWith(SESSION_PREFIX))
         .map((line) => {
           const [name, created, path] = line.split('|');
-          const id = name.replace(SESSION_PREFIX, '');
+          const sessionId = this.getSessionIdFromTmuxName(name);
+          const parsed = sessionId ? parseSessionId(sessionId) : null;
           return {
-            id,
+            id: sessionId || name,
             tmuxName: name,
             directory: path || 'unknown',
-            channelId: this.channelMap.get(id),
+            guildId: parsed?.guildId || '',
+            channelId: parsed?.channelId || '',
             createdAt: created ? new Date(parseInt(created) * 1000) : null,
             attachCommand: `tmux attach -t ${name}`,
           };
@@ -263,7 +256,7 @@ class SessionManager {
     const tmuxName = this.getTmuxName(sessionId);
 
     if (!this.sessionExists(sessionId)) {
-      throw new Error(`Session "${sessionId}" does not exist`);
+      throw new Error(`Session does not exist`);
     }
 
     try {
@@ -291,7 +284,7 @@ class SessionManager {
     const tmuxName = this.getTmuxName(sessionId);
 
     if (!this.sessionExists(sessionId)) {
-      throw new Error(`Session "${sessionId}" does not exist`);
+      throw new Error(`Session does not exist`);
     }
 
     try {
@@ -354,7 +347,7 @@ class SessionManager {
     const tmuxName = this.getTmuxName(sessionId);
 
     if (!this.sessionExists(sessionId)) {
-      throw new Error(`Session "${sessionId}" does not exist`);
+      throw new Error(`Session does not exist`);
     }
 
     try {
@@ -372,22 +365,14 @@ class SessionManager {
     const tmuxName = this.getTmuxName(sessionId);
 
     if (!this.sessionExists(sessionId)) {
-      throw new Error(`Session "${sessionId}" does not exist`);
+      throw new Error(`Session does not exist`);
     }
 
     try {
       execSync(`tmux kill-session -t "${tmuxName}"`, { stdio: 'pipe' });
 
-      // Clean up mappings
-      const channelId = this.channelMap.get(sessionId);
-      if (channelId) {
-        this.reverseMap.delete(channelId);
-      }
-      this.channelMap.delete(sessionId);
+      // Clean up last output tracking
       this.lastOutput.delete(sessionId);
-
-      // Persist changes to disk
-      this.saveSessionsToFile();
 
       return true;
     } catch (error) {
@@ -396,7 +381,7 @@ class SessionManager {
   }
 
   /**
-   * Get session info
+   * Get session info by session ID
    */
   getSession(sessionId: string): SessionInfo | null {
     const tmuxName = this.getTmuxName(sessionId);
@@ -415,11 +400,13 @@ class SessionManager {
       if (!line) return null;
 
       const [name, created, path] = line.split('|');
+      const parsed = parseSessionId(sessionId);
       return {
         id: sessionId,
         tmuxName: name,
         directory: path || 'unknown',
-        channelId: this.channelMap.get(sessionId),
+        guildId: parsed?.guildId || '',
+        channelId: parsed?.channelId || '',
         createdAt: created ? new Date(parseInt(created) * 1000) : null,
         attachCommand: `tmux attach -t ${name}`,
       };
@@ -429,79 +416,11 @@ class SessionManager {
   }
 
   /**
-   * Unlink a channel (when channel is deleted)
+   * Get session info for a Discord channel
    */
-  unlinkChannel(channelId: string): void {
-    const sessionId = this.reverseMap.get(channelId);
-    if (sessionId) {
-      this.channelMap.delete(sessionId);
-      this.reverseMap.delete(channelId);
-      this.saveSessionsToFile();
-    }
-  }
-
-  /**
-   * Save current session state to disk
-   */
-  private saveSessionsToFile(): void {
-    const sessions: PersistedSession[] = [];
-    for (const [sessionId, channelId] of this.channelMap.entries()) {
-      const info = this.getSession(sessionId);
-      if (info) {
-        sessions.push({
-          id: sessionId,
-          channelId,
-          directory: info.directory,
-          tmuxName: info.tmuxName,
-        });
-      }
-    }
-
-    // Ensure directory exists
-    const dir = join(homedir(), '.disclaude');
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-
-    try {
-      writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2));
-    } catch (e) {
-      console.error('Failed to save sessions file:', e);
-    }
-  }
-
-  /**
-   * Load sessions from disk
-   */
-  private loadSessionsFromFile(): PersistedSession[] {
-    try {
-      if (existsSync(SESSIONS_FILE)) {
-        return JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'));
-      }
-    } catch (e) {
-      console.error('Failed to load sessions file:', e);
-    }
-    return [];
-  }
-
-  /**
-   * Restore sessions from disk on startup
-   * Returns list of restored sessions for caller to start pollers
-   */
-  restoreSessions(): PersistedSession[] {
-    const saved = this.loadSessionsFromFile();
-    const restored: PersistedSession[] = [];
-
-    for (const session of saved) {
-      // Verify tmux session still exists
-      if (this.sessionExists(session.id)) {
-        this.channelMap.set(session.id, session.channelId);
-        this.reverseMap.set(session.channelId, session.id);
-        restored.push(session);
-      }
-    }
-
-    return restored;
+  getSessionForChannel(guildId: string, channelId: string): SessionInfo | null {
+    const sessionId = makeSessionId(guildId, channelId);
+    return this.getSession(sessionId);
   }
 }
 
