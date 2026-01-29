@@ -81,6 +81,8 @@ DISCORD_GUILD_ID=your_server_id            # Right-click server → Copy Server 
 
 # Security (see "Locking It Down")
 ALLOWED_USERS=your_discord_user_id         # Right-click yourself → Copy User ID
+
+# Note: Enable Developer Mode in Discord (Settings → Advanced) to see "Copy ID" options
 ALLOWED_PATHS=~/projects,~/work
 
 # Optional
