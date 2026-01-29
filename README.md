@@ -1,106 +1,133 @@
-# Disclaude (Improved)
+# 🪩 Disco Demon 😈
 
-A Discord bot for managing persistent Claude Code sessions. Each session gets its own channel - just type to talk to Claude.
+Persistent Claude Code sessions in Discord. Create a channel, start typing, Claude responds.
 
-> **Fork Notice:** This is an improved fork of [disclaude/app](https://github.com/disclaude/app) by Mike Burgh. See [Changes from Upstream](#changes-from-upstream) and [Credits](#credits).
+## ⚠️ Security Warning
 
-## How It Works
+**This is a security nightmare. Advanced users only.**
 
-1. Create a session with `/claude new myproject /path/to/project`
-2. A new channel `#myproject` is created in the "Claude Sessions" category
-3. Just type in that channel - your messages go directly to Claude
-4. Claude's output streams back to the channel automatically
-5. Scroll up to see the full conversation history
-6. Drop into the terminal anytime with `/claude attach` to get the tmux command
+This bot gives anyone in your Discord channel the ability to execute arbitrary code on your machine. Read that again. Anyone who can type in a session channel can tell Claude to:
+
+- Run any shell command (`rm -rf /`, `curl malware.sh | bash`, whatever)
+- Read any file your user can access (SSH keys, browser cookies, env files)
+- Edit any file (inject backdoors, modify configs, corrupt data)
+- Exfiltrate data to external servers
+
+If that doesn't terrify you, you're not thinking hard enough. This is raw, unsandboxed access to your system through a chat interface.
+
+**Do not run this bot if:**
+- You share your Discord server with anyone you don't trust completely
+- You're on a machine with sensitive data
+- You don't understand what `--dangerously-skip-permissions` means
+
+Still here? See [Locking It Down](#locking-it-down) for how to reduce the blast radius.
+
+---
 
 ## Features
 
-- **Channel per session** - Each Claude session gets its own Discord channel
-- **Just type** - No commands needed, messages go straight to Claude
-- **Image support** - Send images and Claude can analyze them
-- **Live output** - Claude's responses stream to the channel in real-time
-- **Clean formatting** - Tool calls shown as compact summaries with emojis (⚡ Bash, 📖 Read, ✏️ Edit, etc.)
-- **Stop button** - Click to interrupt Claude mid-response
-- **Customizable instructions** - Edit `config/session-claude.md` to customize Claude's behavior across all sessions
-- **Typing indicator** - Shows Discord typing indicator while Claude processes
-- **Persistent** - Sessions run in tmux, survive disconnects and bot restarts
-- **Auto-reconnect** - Bot automatically reconnects to existing sessions on restart
-- **Terminal access** - Attach directly via tmux whenever you want
+- 📺 **Channel per session** - Each Claude session gets its own Discord channel
+- 💬 **Just type** - No commands needed, messages go straight to Claude
+- 🖼️ **Image support** - Send images and Claude can analyze them
+- 📡 **Live output** - Claude's responses stream to the channel in real-time
+- ✨ **Clean formatting** - Tool calls shown as compact summaries with emojis
+- 🛑 **Stop button** - Click to interrupt Claude mid-response
+- ⌨️ **Typing indicator** - Shows "typing..." while Claude processes
+- 🔄 **Persistent** - Sessions survive disconnects and bot restarts
+- 🔗 **Auto-reconnect** - Bot finds existing sessions on startup
+- 🖥️ **Terminal access** - Drop into tmux whenever you want full control
 
-## Prerequisites
-
-- Node.js 18+
-- tmux (`sudo dnf install tmux` on Fedora, `brew install tmux` on macOS)
-- Claude Code CLI installed and authenticated
-- A Discord server where you have permission to create channels
-
-## Setup
-
-### 1. Create a Discord Application
-
-1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
-2. Click "New Application"
-3. Go to **Bot** → Click "Reset Token" → Copy the token
-4. Enable **Message Content Intent** under Privileged Gateway Intents
-5. Go to **OAuth2 → URL Generator**:
-   - Scopes: `bot`, `applications.commands`
-   - Bot Permissions: `Send Messages`, `Manage Channels`, `Embed Links`, `Add Reactions`, `Read Message History`
-6. Open the generated URL to invite the bot to your server
-
-### 2. Configure
-
-Create a `.env` file:
-```bash
-# Required
-DISCORD_TOKEN=your_bot_token_here
-DISCORD_CLIENT_ID=your_client_id_here
-DISCORD_GUILD_ID=your_guild_id_here
-
-# Security (highly recommended)
-ALLOWED_USERS=123456789012345678
-ALLOWED_PATHS=~/projects,~/work
-
-# Optional
-DEFAULT_DIRECTORY=~/projects
-CATEGORY_NAME=Claude Sessions
-MESSAGE_RETENTION_DAYS=7
-RATE_LIMIT_MS=1000
-```
-
-### 3. Run
+## Quick Start
 
 ```bash
+git clone https://github.com/QwertyMcQwertz/disco-demon.git
+cd disco-demon
+cp .env.example .env  # Edit with your Discord credentials
 npm install
 npm start
 ```
 
-For development (with hot reload):
+Then in Discord: `/claude new myproject ~/code/myproject`
+
+## How It Works
+
+```
+You (Discord)              Disco Demon                tmux + Claude
+     │                          │                          │
+     │  "add rate limiting"     │                          │
+     └─────────────────────────►│  tmux send-keys ────────►│
+                                │                          │ Claude thinks...
+                                │◄──── capture-pane ───────│ Claude responds
+     │◄─────────────────────────│                          │
+     │  [formatted response]    │                          │
+```
+
+1. You type in a session channel
+2. Disco Demon sends your message to a tmux session running `claude`
+3. Disco Demon polls the tmux pane for new output
+4. Output is parsed, formatted, and streamed back to Discord
+
+Sessions are named `disco_{guildId}_{channelId}` - the bot finds them by querying tmux directly (no state file needed).
+
+## Installation
+
+### Prerequisites
+
+- **Node.js 18+**
+- **tmux** - `sudo dnf install tmux` (Fedora) or `brew install tmux` (macOS)
+- **Claude Code CLI** - installed and authenticated (`claude --version`)
+- **Discord server** - where you have Manage Channels permission
+
+### Discord Bot Setup
+
+1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
+2. Click **New Application** → name it "Disco Demon" or whatever
+3. Go to **Bot** → **Reset Token** → copy it (you'll need this)
+4. Enable **Message Content Intent** under Privileged Gateway Intents
+5. Go to **OAuth2 → URL Generator**:
+   - Scopes: `bot`, `applications.commands`
+   - Bot Permissions: `Send Messages`, `Manage Channels`, `Embed Links`, `Add Reactions`, `Read Message History`
+6. Open the generated URL → invite the bot to your server
+
+### Configuration
+
+Create a `.env` file:
+
 ```bash
-npm run dev
+# Required
+DISCORD_TOKEN=your_bot_token
+DISCORD_CLIENT_ID=your_application_id
+DISCORD_GUILD_ID=your_server_id
+
+# Security (see "Locking It Down")
+ALLOWED_USERS=your_discord_user_id
+ALLOWED_PATHS=~/projects,~/work
+
+# Optional
+DEFAULT_DIRECTORY=~/projects
+CATEGORY_NAME=Disco Demon
+MESSAGE_RETENTION_DAYS=7
+RATE_LIMIT_MS=1000
+```
+
+### Running
+
+```bash
+npm start           # Production
+npm run dev         # Development (hot reload)
 ```
 
 ### Running as a systemd Service
 
-If you run disclaude as a systemd user service, you **must** set `KillMode=process` so tmux sessions survive restarts:
+If you use systemd, you **must** set `KillMode=process` or tmux sessions die when the bot restarts:
 
-```bash
-# Add KillMode=process to your service file
-sed -i '/^\[Service\]/a KillMode=process' ~/.config/systemd/user/disclaude.service
-
-# Reload and restart
-systemctl --user daemon-reload
-systemctl --user restart disclaude
-```
-
-Without this, systemd kills the tmux server when disclaude restarts, destroying all sessions.
-
-Example service file (`~/.config/systemd/user/disclaude.service`):
 ```ini
+# ~/.config/systemd/user/discod.service
 [Unit]
-Description=Disclaude - Claude Code Discord Bot
+Description=Disco Demon
 
 [Service]
-WorkingDirectory=/path/to/disclaude
+WorkingDirectory=/path/to/disco-demon
 ExecStart=/usr/bin/npm start
 Restart=always
 KillMode=process
@@ -110,181 +137,130 @@ Environment=NODE_ENV=production
 WantedBy=default.target
 ```
 
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now discod
+```
+
 ## Commands
 
 | Command | Description |
 |---------|-------------|
 | `/claude new <name> [directory]` | Create a new session + channel |
-| `/claude list` | List all active sessions with stats |
-| `/claude sync` | Reconnect orphaned tmux sessions to Discord channels |
-| `/claude end` | End the session (run in session channel) |
-| `/claude output [lines]` | Dump recent raw output (run in session channel) |
+| `/claude list` | List all active sessions |
+| `/claude sync` | Reconnect orphaned tmux sessions |
+| `/claude end` | End the current session |
 | `/claude attach` | Get the tmux attach command |
-| `/claude stop` | Send ESC to stop Claude mid-response |
+| `/claude output [lines]` | Dump recent raw terminal output |
+| `/claude stop` | Send ESC to interrupt Claude |
 
-## Usage
+## Usage Examples
 
-**In Discord:**
+**Create a session:**
 ```
-/claude new api-server ~/Dev/my-api
+/claude new api-server ~/code/my-api
 ```
-→ Creates `#api-server` channel
+→ Creates `#api-server` channel in the "Disco Demon" category
 
-**In the channel:**
+**In the channel, just type:**
 ```
 Help me add rate limiting to the /users endpoint
 ```
-→ Message goes to Claude, response streams back
+→ Claude reads your code, makes changes, responds with what it did
 
-**In Terminal:**
-Use `/claude attach` in the channel to get the tmux attach command, then run it in your terminal for full access to the session.
-
-## Architecture
-
+**Attach to the terminal:**
 ```
-Discord Channel                tmux Session
-     │                              │
-     │  "Add rate limiting"         │
-     └────────────────────────────► │ claude (CLI)
-                                    │
-     ┌────────────────────────────◄ │
-     │  [Claude's response...]      │
-     ▼                              │
-  Channel                           │
+/claude attach
 ```
+→ Copy the `tmux attach -t disco_...` command, paste in your terminal
 
-Sessions are tmux sessions with convention-based naming (`disco_{guildId}_{channelId}`). The bot:
-1. Creates tmux sessions running `claude --dangerously-skip-permissions`
-2. Sends your Discord messages to the session via `tmux send-keys`
-3. Polls for new output, parses it, and streams formatted responses to Discord
-4. On restart, reconnects by querying tmux for existing sessions (no state file needed)
+## Locking It Down
 
-## Security
+You're running this thing. Might as well reduce the damage when (not if) something goes wrong.
 
-> **⚠️ Warning:** This bot can execute arbitrary code on your machine. Anyone who can send messages to a session channel can instruct Claude to run commands, edit files, etc.
+### User Whitelist (Required)
 
-### User Whitelist
-
-**Always** set `ALLOWED_USERS` in your `.env`:
+Only let specific Discord users interact with sessions:
 
 ```bash
-# Single user
-ALLOWED_USERS=123456789012345678
-
-# Multiple users
 ALLOWED_USERS=123456789012345678,987654321098765432
 ```
 
-To get your Discord user ID: Discord Settings → Advanced → Enable Developer Mode, then right-click your username → Copy User ID.
+Get your user ID: Discord Settings → Advanced → Developer Mode → right-click your name → Copy User ID
 
-### Path Restrictions
+### Path Restrictions (Recommended)
 
-Restrict which directories sessions can be created in:
+Limit which directories sessions can be created in:
 
 ```bash
-ALLOWED_PATHS=~/projects,~/work,/opt/apps
+ALLOWED_PATHS=~/projects,~/work
 ```
 
-Without this, sessions can be created in any directory the bot has access to.
+Claude can still read/write anywhere, but at least you control where sessions start.
 
-### Additional Recommendations
+### Additional Measures
 
-- **Enable 2FA** on your Discord account
-- **Never commit `.env`** - it's in `.gitignore` by default
-- **Regenerate your bot token** immediately if exposed
-- **Run in a VM/container** for additional isolation
-- **Keep the guild private** - don't invite untrusted users
+- **Private server** - Don't invite randos
+- **2FA on Discord** - Protect your account
+- **VM/container** - Run this in isolation if possible
+- **Audit `#disco-logs`** - The bot logs session creation and file edits
 
-### Bot Logs
+## Configuration Reference
 
-The bot creates a `#bot-logs` channel in the Claude Sessions category that logs:
-- Session creation/deletion
-- File edits detected
-- Errors and warnings
-
-## Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DISCORD_TOKEN` | Yes | Bot token from Discord Developer Portal |
-| `DISCORD_CLIENT_ID` | Yes | Application ID from Discord Developer Portal |
-| `DISCORD_GUILD_ID` | Yes | Server ID (right-click server → Copy ID) |
-| `ALLOWED_USERS` | No* | Comma-separated Discord user IDs (* highly recommended) |
-| `ALLOWED_PATHS` | No* | Comma-separated directories for sessions (* recommended) |
-| `DEFAULT_DIRECTORY` | No | Default working directory for new sessions |
-| `CATEGORY_NAME` | No | Category name for session channels (default: "Claude Sessions") |
-| `MESSAGE_RETENTION_DAYS` | No | Auto-delete messages older than N days |
-| `RATE_LIMIT_MS` | No | Minimum ms between messages per user (default: 1000) |
-
-## Data Storage
-
-- `<session-dir>/.claude/CLAUDE.md` - Discord formatting guide for each session (from template)
-- `<session-dir>/.disclaude-images/` - Downloaded image attachments from Discord
-
-## Customization
-
-The file `config/session-claude.md` is a template that gets copied to each session's `.claude/CLAUDE.md`. Edit it to customize Claude's behavior across all your sessions.
-
-The template includes:
-- Discord formatting rules (what works, what doesn't)
-- Instructions for asking questions (as numbered lists, not interactive prompts)
-- Message length guidelines
-
-HTML comments (`<!-- ... -->`) in the template are stripped when copying - use them to document your customizations.
-
-**Note:** Changes only apply to new sessions. Existing sessions keep their current `.claude/CLAUDE.md` (to preserve any manual edits).
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DISCORD_TOKEN` | Yes | - | Bot token from Developer Portal |
+| `DISCORD_CLIENT_ID` | Yes | - | Application ID from Developer Portal |
+| `DISCORD_GUILD_ID` | Yes | - | Your server ID |
+| `ALLOWED_USERS` | Yes* | - | Comma-separated user IDs (*or set `ALLOW_ALL_USERS=true`) |
+| `ALLOWED_PATHS` | No | - | Comma-separated directory paths |
+| `DEFAULT_DIRECTORY` | No | `~/.discod/sessions` | Default working directory |
+| `CATEGORY_NAME` | No | `Disco Demon` | Discord category name |
+| `MESSAGE_RETENTION_DAYS` | No | - | Auto-delete old messages |
+| `RATE_LIMIT_MS` | No | `1000` | Minimum ms between messages per user |
+| `ALLOW_ALL_USERS` | No | `false` | Allow anyone (dangerous) |
 
 ## Troubleshooting
 
 ### "tmux: command not found"
-Install tmux: `sudo dnf install tmux` (Fedora) or `brew install tmux` (macOS)
 
-### Sessions lost after bot restart
-Add `KillMode=process` to your systemd service file. See [Running as a systemd Service](#running-as-a-systemd-service).
+Install it: `sudo dnf install tmux` or `brew install tmux`
 
-### Bot not responding to messages
-1. Check that the user is in `ALLOWED_USERS`
-2. Verify the channel is linked to a session (`/claude list`)
-3. Check `#bot-logs` for errors
-4. Verify the tmux session exists: `tmux list-sessions`
+### Bot not responding
 
-### "Directory not in allowed paths" error
-Add the directory to `ALLOWED_PATHS` in your `.env` file.
+1. Is the user in `ALLOWED_USERS`?
+2. Does the channel have an active session? (`/claude list`)
+3. Check `#disco-logs` for errors
+4. Is the tmux session alive? (`tmux list-sessions`)
 
-### Claude not responding in tmux
-Use `/claude attach` to get the tmux command, then attach and check for errors. The Claude CLI may need re-authentication.
+### Session lost after restart
 
-## Changes from Upstream
+Add `KillMode=process` to your systemd service. Without it, systemd kills tmux when the bot restarts.
 
-This fork includes the following improvements over [disclaude/app](https://github.com/disclaude/app):
+### Claude not responding in terminal
 
-### Claude Code Compatibility
-- **v2.1.22+ support** - Uses `--dangerously-skip-permissions` flag to bypass the trust dialog
-- **Updated marker detection** - Recognizes `❯` for user input and `●` for Claude responses (changed in newer Claude Code versions)
+Attach to the session and look for errors:
+```bash
+tmux attach -t disco_<guildId>_<channelId>
+```
+Claude CLI might need re-authentication.
 
-### Output Formatting
-- **Discord-native formatting** - Parses Claude's terminal output into clean, readable messages
-- **Tool call summaries** - Tool calls shown as compact lines with emojis:
-  - ⚡ Bash commands
-  - 📖 Read / ✏️ Edit / 📝 Write files
-  - 🔍 Glob/Grep searches
-  - 🤖 Task (subagent)
-  - 🌐 WebFetch / 🔎 WebSearch
-  - 📔 MCP tool calls
-- **Terminal noise removed** - Status bars, prompts, and UI hints are stripped
-- **Wide terminal** - 200-column tmux window prevents URL wrapping
+### "Directory not in allowed paths"
 
-### User Experience
-- **Image support** - Send images in Discord; they're downloaded locally and Claude can analyze them
-- **Typing indicator** - Discord shows "Claude is typing..." while processing
-- **Session workspace** - Each session directory gets a `.claude/CLAUDE.md` with Discord formatting tips for Claude
-- **Stateless reconnection** - Convention-based tmux naming eliminates need for state files
+Add the directory to `ALLOWED_PATHS` in your `.env`.
 
-### Deployment
-- **systemd compatibility** - Documents `KillMode=process` requirement for service files
+## Architecture
 
-## Credits
+**Data flow:**
+- Discord messages → `tmux send-keys` → Claude CLI
+- Claude output → `tmux capture-pane` → parsed → Discord
 
-This project is based on [disclaude](https://github.com/disclaude/app) by **Mike Burgh**.
+**Files created:**
+- `<session-dir>/.claude/CLAUDE.md` - Discord formatting guide for Claude
+- `<session-dir>/.disco-images/` - Downloaded image attachments
 
-See [NOTICE.md](NOTICE.md) for full attribution.
+**Session naming:** `disco_{guildId}_{channelId}` - allows stateless reconnection by querying tmux directly.
+
+---
+
+*Originally inspired by [disclaude](https://github.com/disclaude/app)*

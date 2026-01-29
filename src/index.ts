@@ -265,7 +265,7 @@ async function registerCommands(): Promise<void> {
   }
 }
 
-// Find or create the Claude Sessions category
+// Find or create the Disco Demon category
 async function getOrCreateCategory(guild: Guild): Promise<CategoryChannel> {
   let category = guild.channels.cache.find(
     (c) => c.type === ChannelType.GuildCategory && c.name === config.categoryName
@@ -594,7 +594,7 @@ function startOutputPoller(sessionId: string, channel: TextChannel): void {
         for (const file of editedFiles) {
           if (!stats.filesEdited.includes(file)) {
             stats.filesEdited.push(file);
-            // Log file edit to bot-logs
+            // Log file edit to disco-logs
             const fileName = file.split('/').pop() || file;
             botLog('info', `📝 **${sessionId}**: Edited \`${fileName}\``);
           }
@@ -783,7 +783,7 @@ client.on('interactionCreate', async (interaction) => {
         const orphaned = sessions.filter(s => !s.channelId);
 
         const embed = new EmbedBuilder()
-          .setTitle('Active Claude Sessions')
+          .setTitle('Active Sessions')
           .setColor(0x7c3aed)
           .setDescription(
             sessions
@@ -1060,7 +1060,7 @@ client.on('messageCreate', async (message: Message) => {
     if (imageAttachments.size > 0) {
       const session = sessionManager.getSession(sessionId);
       if (session) {
-        const imageDir = join(session.directory, '.disclaude-images');
+        const imageDir = join(session.directory, '.disco-images');
 
         // Ensure directory exists
         if (!existsSync(imageDir)) {
@@ -1128,7 +1128,7 @@ async function cleanupOldMessages(guild: Guild): Promise<number> {
   const cutoffTime = Date.now() - config.messageRetentionDays * 24 * 60 * 60 * 1000;
   let deletedCount = 0;
 
-  // Find the Claude Sessions category
+  // Find the Disco Demon category
   const category = guild.channels.cache.find(
     (c): c is CategoryChannel =>
       c.type === ChannelType.GuildCategory && c.name === config.categoryName
@@ -1206,25 +1206,25 @@ client.once('ready', async () => {
     try {
       const guild = await client.guilds.fetch(config.guildId);
 
-      // Find or create #bot-logs channel in the category
+      // Find or create #disco-logs channel in the category
       const category = await getOrCreateCategory(guild);
       const existingLogChannel = guild.channels.cache.find(
         (c): c is TextChannel =>
           c.type === ChannelType.GuildText &&
           c.parentId === category.id &&
-          c.name === 'bot-logs'
+          c.name === 'disco-logs'
       );
 
       if (existingLogChannel) {
         logChannel = existingLogChannel;
       } else {
         logChannel = await guild.channels.create({
-          name: 'bot-logs',
+          name: 'disco-logs',
           type: ChannelType.GuildText,
           parent: category.id,
           topic: 'Bot activity logs and status updates',
         });
-        botLog('info', 'Created #bot-logs channel');
+        botLog('info', 'Created #disco-logs channel');
       }
 
       // Set initial bot status

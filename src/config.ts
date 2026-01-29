@@ -3,7 +3,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 
 // Default session directory - used when DEFAULT_DIRECTORY env var is not set
-const DEFAULT_SESSION_DIR = join(homedir(), '.disclaude', 'sessions');
+const DEFAULT_SESSION_DIR = join(homedir(), '.discod', 'sessions');
 
 export interface Config {
   token: string;
@@ -38,8 +38,8 @@ export const config: Config = {
   // Guild ID for faster command registration (optional but recommended)
   guildId: process.env.DISCORD_GUILD_ID || null,
 
-  // Category name for Claude session channels
-  categoryName: process.env.CATEGORY_NAME || 'Claude Sessions',
+  // Category name for session channels
+  categoryName: process.env.CATEGORY_NAME || 'Disco Demon',
 
   // Default working directory for new sessions
   defaultDirectory: process.env.DEFAULT_DIRECTORY || DEFAULT_SESSION_DIR,

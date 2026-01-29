@@ -1,5 +1,5 @@
 /**
- * Utility functions for Disclaude
+ * Utility functions for Disco Demon
  * Extracted for testability
  */
 

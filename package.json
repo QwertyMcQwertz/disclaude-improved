@@ -1,5 +1,5 @@
 {
-  "name": "disclaude",
+  "name": "discod",
   "version": "1.0.0",
   "type": "module",
   "main": "dist/index.js",
@@ -12,13 +12,13 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
-  "keywords": [],
-  "author": "Mike Burgh (https://github.com/disclaude)",
+  "keywords": ["discord", "claude", "ai", "bot", "tmux"],
+  "author": "QwertyMcQwertz",
   "license": "MIT",
-  "description": "Discord bot for managing persistent Claude Code sessions",
+  "description": "Disco Demon - Discord bot for persistent Claude Code sessions",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/QwertyMcQwertz/disclaude-improved.git"
+    "url": "git+https://github.com/QwertyMcQwertz/disco-demon.git"
   },
   "dependencies": {
     "discord.js": "^14.25.1",
