@@ -41,8 +41,8 @@ Still here? See [Locking It Down](#locking-it-down) for how to reduce the blast 
 
 ### Prerequisites
 
-- **Node.js 18+**
-- **tmux** - `sudo dnf install tmux` (Fedora) or `brew install tmux` (macOS)
+- **[Node.js 18+](https://nodejs.org/en/download)**
+- **[tmux](https://github.com/tmux/tmux/wiki/Installing)**
 - **Claude Code CLI** - installed and authenticated (`claude --version`)
 - **Discord server** - where you have Manage Channels permission
 
@@ -228,7 +228,7 @@ Claude can still read/write anywhere, but at least you control where sessions st
 
 ### "tmux: command not found"
 
-Install it: `sudo dnf install tmux` or `brew install tmux`
+Install tmux: [github.com/tmux/tmux/wiki/Installing](https://github.com/tmux/tmux/wiki/Installing)
 
 ### Bot not responding
 
