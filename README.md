@@ -43,8 +43,8 @@ Still here? See [Locking It Down](#locking-it-down) for how to reduce the blast 
 
 - **[Node.js 18+](https://nodejs.org/en/download)**
 - **[tmux](https://github.com/tmux/tmux/wiki/Installing)**
-- **Claude Code CLI** - installed and authenticated (`claude --version`)
-- **Discord server** - where you have Manage Channels permission
+- **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** - installed and authenticated (`claude --version`)
+- **[Discord server](https://support.discord.com/hc/en-us/articles/204849977-How-do-I-create-a-server)** - where you have Manage Channels permission
 
 ### 1. Clone the repo
 
