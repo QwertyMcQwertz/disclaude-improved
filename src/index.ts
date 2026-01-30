@@ -657,7 +657,7 @@ function startOutputPoller(sessionId: string, channel: TextChannel): void {
 
       // Build stop button
       const stopButton = new ButtonBuilder()
-        .setCustomId(`stop_${sessionId}`)
+        .setCustomId(`stop:${sessionId}`)
         .setLabel('⏹ Stop')
         .setStyle(ButtonStyle.Danger);
 
@@ -983,7 +983,7 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
-  const [type, sessionId, choice] = interaction.customId.split('_');
+  const [type, sessionId] = interaction.customId.split(':');
 
   // Verify the session belongs to this channel (prevent cross-channel attacks)
   const expectedSession = sessionManager.getSessionIdForChannel(interaction.guildId!, interaction.channelId);
