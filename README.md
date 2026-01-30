@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="disco-demon.jpg" width="200" alt="Disco Demon logo">
+  <img src="disco-demon-clear.png" width="200" alt="Disco Demon logo">
 </p>
 
 # 🪩 Disco Demon 😈
