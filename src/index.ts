@@ -550,7 +550,7 @@ function startOutputPoller(sessionId: string, channel: TextChannel): void {
             const filteredRow = new ActionRowBuilder<ButtonBuilder>();
             for (const component of row.components) {
               // Keep buttons that are NOT the stop button
-              if ('customId' in component && component.customId && !component.customId.startsWith('stop_')) {
+              if ('customId' in component && component.customId && !component.customId.startsWith('stop:')) {
                 filteredRow.addComponents(
                   ButtonBuilder.from(component as any)
                 );
