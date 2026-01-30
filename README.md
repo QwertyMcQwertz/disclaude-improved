@@ -1,7 +1,7 @@
 # 🪩 Disco Demon 😈
 
 Discord + Claude Code Daemon.
-Persistent Claude Code sessions in Discord. Create a channel, start typing, Claude responds.
+Persistent sessions. Create a channel, start typing, Claude responds.
 
 ## ⚠️ Security Warning
 
