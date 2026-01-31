@@ -41,6 +41,9 @@ Still here? See [Locking It Down](#locking-it-down) for how to reduce the blast 
 - 🔄 **Persistent** - Sessions survive disconnects and bot restarts
 - 🔗 **Auto-reconnect** - Bot finds existing sessions on startup
 - 🖥️ **Terminal access** - Drop into tmux whenever you want full control
+- 🧩 **Skill installation** - Install skills from [ClawHub](https://clawhub.ai) or GitHub
+- 🤖 **Agent self-install** - Claude can request skills, you approve with one word
+- 📁 **Per-channel workspaces** - Each channel gets its own skills and config
 
 ## Installation
 
@@ -161,6 +164,8 @@ For native macOS service management, see Apple's [launchd documentation](https:/
 
 ## Commands
 
+### Session Management
+
 | Command | Description |
 |---------|-------------|
 | `/disco new <name> [directory]` | Create a new session + channel |
@@ -170,6 +175,22 @@ For native macOS service management, see Apple's [launchd documentation](https:/
 | `/disco attach` | Get the tmux attach command |
 | `/disco output [lines]` | Dump recent raw terminal output |
 | `/disco stop` | Send ESC to interrupt Claude |
+
+### Skills
+
+| Command | Description |
+|---------|-------------|
+| `/disco clawhub search <query>` | Search for skills on ClawHub |
+| `/disco clawhub add <slug> [scope]` | Install a skill from ClawHub |
+| `/disco skill add <source> [scope]` | Install a skill from GitHub |
+| `/disco skill list` | List installed skills by scope |
+| `/disco skill remove <name> [scope]` | Remove an installed skill |
+
+**Scope options:** `channel` (this channel only), `disco` (all Disco Demon channels), `global` (all Claude sessions)
+
+**GitHub source formats:**
+- `user/repo` - skill at repo root
+- `user/repo/path/to/skill` - skill in subdirectory
 
 ## Usage Examples
 
@@ -190,6 +211,21 @@ Help me add rate limiting to the /users endpoint
 /disco attach
 ```
 → Copy the `tmux attach -t disco_...` command, paste in your terminal
+
+**Install a skill from ClawHub:**
+```
+/disco clawhub add rlm
+```
+→ Prompts for scope (1=channel, 2=disco, 3=global), then installs
+
+**Install a skill from GitHub:**
+```
+/disco skill add openclaw/openclaw/skills/skill-creator
+```
+→ Clones repo, extracts SKILL.md, prompts for scope
+
+**Let Claude install skills:**
+Claude can output `[SKILL_REQUEST: source="clawhub:rlm" scope="channel"]` and you'll be prompted to confirm
 
 ## How It Works
 
@@ -292,9 +328,25 @@ Add the directory to `ALLOWED_PATHS` in your `.env`.
 - Discord messages → `tmux send-keys` → Claude CLI
 - Claude output → `tmux capture-pane` → parsed → Discord
 
-**Files created:**
-- `<session-dir>/.claude/CLAUDE.md` - Discord formatting guide for Claude
-- `<session-dir>/.disco-images/` - Downloaded image attachments
+**Directory structure:**
+```
+~/.discod/sessions/           # Parent workspace (DEFAULT_DIRECTORY)
+├── .claude/
+│   └── CLAUDE.md             # Discord formatting rules (inherited by all)
+├── skills/                   # Skills for ALL disco-demon channels
+├── my-project/               # Channel workspace (channel name)
+│   ├── .claude/
+│   │   └── CLAUDE.md         # Channel-specific instructions
+│   ├── skills/               # Skills for just this channel
+│   └── .disco-images/        # Downloaded image attachments
+└── another-channel/
+    └── ...
+```
+
+**Skills hierarchy:**
+- Channel skills: `~/.discod/sessions/<channel>/skills/`
+- Disco skills: `~/.discod/sessions/skills/`
+- Global skills: `~/.claude/skills/`
 
 **Session naming:** `disco_{guildId}_{channelId}` - allows stateless reconnection by querying tmux directly.
 
