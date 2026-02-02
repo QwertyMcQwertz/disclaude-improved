@@ -133,8 +133,7 @@ interface SessionStats {
 }
 const sessionStats = new Map<string, SessionStats>();
 
-// Rate limiting: track last message time per user
-const userLastMessage = new Map<string, number>();
+// Note: Rate limiting removed - debouncing handles rapid messages instead
 
 // Message debouncing: batch rapid messages from same user
 interface PendingMessage {
@@ -1838,15 +1837,6 @@ client.on('messageCreate', async (message: Message) => {
     }
     // If not confirm/cancel, continue with normal message handling
   }
-
-  // Rate limiting check
-  const now = Date.now();
-  const lastTime = userLastMessage.get(message.author.id) || 0;
-  if (now - lastTime < config.rateLimitMs) {
-    // Silently ignore rate-limited messages
-    return;
-  }
-  userLastMessage.set(message.author.id, now);
 
   // Process message content and images
   const processMessageContent = async (): Promise<string> => {
