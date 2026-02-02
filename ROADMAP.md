@@ -4,12 +4,12 @@ Features are grouped into tiers by theme, not strict implementation order. Items
 
 ## Planned
 
-### Tier 0: Quick Wins
+### Tier 0: Quick Wins ✅
 
-- **User context in prompts** — Claude knows who's talking (username, channel) for more relevant responses
-- **Log sensitivity split** — Sanitized logs safe to share publicly, detailed logs kept private
-- **Simpler tmux session names** — Easier to attach manually (e.g., `disco_research` instead of long IDs)
-- **Message debouncing** — Rapid consecutive messages batched into a single Claude turn
+- [x] **User context in prompts** — Claude knows who's talking (username, channel) for more relevant responses
+- [x] **Log sensitivity split** — Sanitized logs safe to share publicly, detailed logs kept private
+- [x] **Simpler tmux session names** — Easier to attach manually (e.g., `disco_research` instead of long IDs)
+- [x] **Message debouncing** — Rapid consecutive messages batched into a single Claude turn
 
 ### Tier 1: Infrastructure
 
