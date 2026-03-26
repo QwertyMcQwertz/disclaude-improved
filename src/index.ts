@@ -1274,7 +1274,8 @@ client.on('interactionCreate', async (interaction) => {
     switch (subcommand) {
       case 'new': {
         const name = interaction.options.getString('name', true);
-        const directory = interaction.options.getString('directory') || config.defaultDirectory;
+        const explicitDir = interaction.options.getString('directory');
+        const directory = explicitDir || config.defaultDirectory;
 
         await interaction.deferReply();
 
@@ -1288,12 +1289,13 @@ client.on('interactionCreate', async (interaction) => {
           parent: category.id,
         });
 
-        // Create session - creates channel subdirectory under base directory
+        // Create session - use explicit directory directly, or subdirectory under default
         const session = await sessionManager.createSession(
           interaction.guildId!,
           channel.id,
           cleanName,
-          directory
+          directory,
+          !!explicitDir
         );
 
         // Update channel topic with actual tmux session name
@@ -1883,8 +1885,14 @@ client.on('messageCreate', async (message: Message) => {
     return textToSend;
   };
 
+  // Guard against double sends
+  let alreadySent = false;
+
   // Function to send accumulated messages to Claude
   const sendAccumulatedMessages = async (pending: PendingMessage) => {
+    if (alreadySent) return;
+    alreadySent = true;
+
     try {
       // Show typing indicator
       await pending.channel.sendTyping();
@@ -1895,8 +1903,8 @@ client.on('messageCreate', async (message: Message) => {
       // Skip if nothing to send
       if (!combinedText.trim()) return;
 
-      // Wrap with disco context (using the original message for metadata)
-      const wrappedText = wrapWithContext(pending.originalMessage, combinedText);
+      // Send raw message without context wrapper
+      const wrappedText = combinedText;
 
       // Mark that we're starting a new turn - response should be a new message
       const pendingSessionId = sessionManager.getSessionIdForChannel(
@@ -1988,6 +1996,7 @@ client.on('channelDelete', (channel) => {
     if (sessionId) {
       // Get session info before killing (need directory for workspace deletion)
       const session = sessionManager.getSession(sessionId);
+      const wasExplicitDir = sessionManager.isExplicitDir(sessionId);
 
       stopOutputPoller(sessionId);
       sessionStats.delete(sessionId);
@@ -1998,12 +2007,14 @@ client.on('channelDelete', (channel) => {
         updateBotStatus();
       }
 
-      // Delete the channel workspace (directory, CLAUDE.md, skills, images)
-      if (session?.directory) {
+      // Delete the channel workspace only if it was auto-created (not an explicit user directory)
+      if (session?.directory && !wasExplicitDir) {
         const channelName = basename(session.directory);
         const parentDir = dirname(session.directory);
         deleteChannelWorkspace(parentDir, channelName);
         botLog('info', `Deleted workspace for **${channelName}**`);
+      } else if (session?.directory) {
+        botLog('info', `Preserved explicit directory for **${basename(session.directory)}**`);
       }
     }
   }
