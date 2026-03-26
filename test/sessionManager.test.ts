@@ -412,7 +412,9 @@ describe('SessionManager', () => {
           '-x', '200', '-y', '50',
           '-s', 'disco_uild_test-channel',
           '-c', '/tmp/test/test-channel',
-          'claude', '--dangerously-skip-permissions'
+          'claude',
+          '--permission-mode', 'acceptEdits',
+          '--allowedTools', 'Bash(*),Write(*),Edit(*),Read(*),Glob(*),Grep(*),WebFetch,WebSearch'
         ]),
         expect.any(Object)
       );

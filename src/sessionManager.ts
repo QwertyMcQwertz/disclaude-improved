@@ -202,14 +202,29 @@ function parseSessionId(sessionId: string): { guildId: string; channelId: string
 // Path to session mapping file (for restart survival)
 const SESSION_MAP_PATH = join(homedir(), '.discod', 'session-map.json');
 
+interface SessionMapEntry {
+  tmuxName: string;
+  explicitDir: boolean;
+}
+
 /**
- * Load session ID to tmux name mapping from disk
+ * Load session map from disk
+ * Handles backward compatibility with old format (string values)
  */
-function loadSessionMap(): Map<string, string> {
+function loadSessionMap(): Map<string, SessionMapEntry> {
   try {
     if (existsSync(SESSION_MAP_PATH)) {
       const data = JSON.parse(readFileSync(SESSION_MAP_PATH, 'utf-8'));
-      return new Map(Object.entries(data));
+      const map = new Map<string, SessionMapEntry>();
+      for (const [key, value] of Object.entries(data)) {
+        if (typeof value === 'string') {
+          // Backward compatibility: old format was just tmuxName string
+          map.set(key, { tmuxName: value, explicitDir: false });
+        } else {
+          map.set(key, value as SessionMapEntry);
+        }
+      }
+      return map;
     }
   } catch {
     // Ignore errors, start fresh
@@ -218,9 +233,9 @@ function loadSessionMap(): Map<string, string> {
 }
 
 /**
- * Save session ID to tmux name mapping to disk
+ * Save session map to disk
  */
-function saveSessionMap(map: Map<string, string>): void {
+function saveSessionMap(map: Map<string, SessionMapEntry>): void {
   const dir = dirname(SESSION_MAP_PATH);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -257,7 +272,7 @@ class SessionManager {
     // Check cache first (for existing sessions)
     const cached = this.sessionTmuxMap.get(sessionId);
     if (cached) {
-      return cached;
+      return cached.tmuxName;
     }
 
     // Generate new name if channelName provided
@@ -289,7 +304,8 @@ class SessionManager {
     guildId: string,
     channelId: string,
     channelName: string,
-    baseDirectory: string
+    baseDirectory: string,
+    useDirectoryAsIs: boolean = false
   ): Promise<SessionInfo> {
     const sessionId = makeSessionId(guildId, channelId);
     const tmuxName = this.getTmuxName(sessionId, channelName);
@@ -307,8 +323,16 @@ class SessionManager {
       throw new Error(`Session for this channel already exists`);
     }
 
-    // Create the channel workspace (subdirectory with CLAUDE.md and skills/)
-    const channelDir = ensureChannelWorkspace(baseDirectory, channelName);
+    // If explicit directory, use it directly; otherwise create subdirectory
+    let channelDir: string;
+    if (useDirectoryAsIs) {
+      channelDir = resolvedBase;
+      if (!existsSync(channelDir)) {
+        mkdirSync(channelDir, { recursive: true });
+      }
+    } else {
+      channelDir = ensureChannelWorkspace(baseDirectory, channelName);
+    }
 
     try {
       // Create a new tmux session running claude
@@ -319,7 +343,9 @@ class SessionManager {
         '-x', '200', '-y', '50',
         '-s', tmuxName,
         '-c', channelDir,
-        'claude', '--dangerously-skip-permissions'
+        'claude',
+        '--permission-mode', 'acceptEdits',
+        '--allowedTools', 'Bash(*),Write(*),Edit(*),Read(*),Glob(*),Grep(*),WebFetch,WebSearch'
       ], { stdio: 'pipe' });
 
       if (result.status !== 0) {
@@ -327,7 +353,7 @@ class SessionManager {
       }
 
       // Store the sessionId -> tmuxName mapping for lookups
-      this.sessionTmuxMap.set(sessionId, tmuxName);
+      this.sessionTmuxMap.set(sessionId, { tmuxName, explicitDir: useDirectoryAsIs });
       saveSessionMap(this.sessionTmuxMap);
 
       return {
@@ -373,12 +399,20 @@ class SessionManager {
   }
 
   /**
+   * Check if a session was created with an explicit directory (useDirectoryAsIs)
+   */
+  isExplicitDir(sessionId: string): boolean {
+    const entry = this.sessionTmuxMap.get(sessionId);
+    return entry?.explicitDir ?? false;
+  }
+
+  /**
    * Reverse lookup: get sessionId from tmux name using the session map
    */
   private getSessionIdFromTmuxNameViaMap(tmuxName: string): string | null {
     // Search the session map for matching tmux name
-    for (const [sessionId, mappedTmuxName] of this.sessionTmuxMap.entries()) {
-      if (mappedTmuxName === tmuxName) {
+    for (const [sessionId, entry] of this.sessionTmuxMap.entries()) {
+      if (entry.tmuxName === tmuxName) {
         return sessionId;
       }
     }
